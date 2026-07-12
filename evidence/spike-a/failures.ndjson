@@ -1,0 +1,1 @@
+{"recordedAt":"2026-07-12T13:22:08+05:30","kind":"development-spike-a","attempt":2,"targetUrl":"https://proofgate-spike-a.bygone-piper.workers.dev/s/saturday-sessions","status":"failed","failure":"HTTP_500","message":"Attempt 2: public page returned 500","countsAsFinalEvidence":false,"source":"actual verifier-runner stderr"}

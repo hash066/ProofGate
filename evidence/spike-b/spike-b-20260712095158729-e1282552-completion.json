@@ -1,0 +1,57 @@
+{
+  "evidenceCategory": "development-spike-b-completion",
+  "countsAsFinalEvidence": false,
+  "gate": "mandatory-external-oracle-spike-b",
+  "gateResult": "passed",
+  "runId": "spike-b-20260712095158729-e1282552",
+  "siteId": "saturday-sessions",
+  "versionId": "spike-a-v1",
+  "specHash": "3505c5e50162d788e2a78eabe7afc6dd473a5e20e2c1fccd56ab699c7a05c42b",
+  "contractId": "spike-b-two-seat-external-ack-v1",
+  "quantity": 2,
+  "actorClass": "external-merchant",
+  "recipientIdentityHash": "b3864828c52b8f8c61cb4f9e0cfe93abe4563f6701e15aed518ffa0f16f381fc",
+  "correlationNonceHash": "3e0ce3df753011c377fb5f65063ba9ee87b03afc0ddf5bcdd02ca234f3b7372e",
+  "telegramReceipt": {
+    "providerMessageId": "20",
+    "recipientBound": true
+  },
+  "events": {
+    "submitted": {
+      "convexDocumentId": "j97dv746rkqcm1bk8wzy0pa7wd8adcnt",
+      "provider": "proofgate-edge",
+      "verificationMethod": "edge_hmac",
+      "payloadHash": "a3397878de3b78df68a8f0c389e6684b1ab38863f6beb9ea7a4b555af4fe5a9f"
+    },
+    "dispatched": {
+      "convexDocumentId": "j97fxapccra2mqbc9244hg8vcx8ac4gy",
+      "provider": "telegram",
+      "verificationMethod": "provider_signature",
+      "payloadHash": "02e09630a1a60a927873e3d2a4f071d33500af9c45d3d2eba8eaf17061203dbc"
+    },
+    "acknowledged": {
+      "convexDocumentId": "j974x2nj5x1vvzrecpgegeg3w18ad9ja",
+      "provider": "telegram",
+      "verificationMethod": "merchant_ack",
+      "actorClass": "external_human",
+      "payloadHash": "9ddc35e47b8cdbfd437ff8e0886d9b17f11a70bd512ccb28734f673271eabfae",
+      "occurredAt": "2026-07-12T09:57:16.468000+00:00"
+    }
+  },
+  "sessionState": {
+    "submitted": true,
+    "consumed": true
+  },
+  "passportProjection": {
+    "externalWitnessSatisfied": true,
+    "passportState": "green",
+    "predicates": {
+      "submitted": true,
+      "dispatched": true,
+      "acknowledged": true
+    },
+    "reason": "EXACT_EXTERNAL_ACKNOWLEDGMENT"
+  },
+  "recordedAt": "2026-07-12T09:57:49.715915+00:00",
+  "truthfulnessNote": "This is real development-spike evidence from a consenting external merchant on temporary Cloudflare infrastructure. It passes mandatory Spike B but is not final production or judging evidence."
+}

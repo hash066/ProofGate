@@ -1,0 +1,31 @@
+{
+  "evidenceCategory": "development-spike-b",
+  "countsAsFinalEvidence": false,
+  "runId": "spike-b-20260712084907167-13815d3f",
+  "siteId": "saturday-sessions",
+  "versionId": "spike-a-v1",
+  "specHash": "3505c5e50162d788e2a78eabe7afc6dd473a5e20e2c1fccd56ab699c7a05c42b",
+  "contractId": "spike-b-two-seat-external-ack-v1",
+  "expectedQuantity": 2,
+  "actorClass": "external-merchant",
+  "actorEligibilityAssertion": "Operator asserted this recipient is outside the builder/team and consented to this development acknowledgment request.",
+  "consentReceipt": "telegram-inbound-2026-07-12T14:14:10+05:30-ready-and-role-confirmed",
+  "recipientIdentityHash": "86bc873f3eca7ddbaa6c083e1e4530020b1e927df2985a0e23c0cd5e00fa0350",
+  "correlationNonceHash": "31a055e8077eda830e0f214cd03e52a179ff620659d4111317792af16d73e5ac",
+  "issuedAt": 1783846147167,
+  "expiresAt": 1783932547167,
+  "publicWorkerUrl": "https://proofgate-spike-a.bygone-piper.workers.dev",
+  "state": "external-acknowledgment-pending",
+  "telegramReceipt": {
+    "platform": "telegram",
+    "chatIdentityHash": "b3864828c52b8f8c61cb4f9e0cfe93abe4563f6701e15aed518ffa0f16f381fc",
+    "providerMessageId": "17",
+    "mirrored": true
+  },
+  "passportProjection": {
+    "externalWitnessSatisfied": false,
+    "passportState": "amber",
+    "reason": "EXTERNAL_ACKNOWLEDGMENT_PENDING"
+  },
+  "completedAt": 1783846161842
+}

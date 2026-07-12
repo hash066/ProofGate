@@ -1,0 +1,37 @@
+{
+  "name": "proofgate",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "demo": "tsx scripts/demo-loop.mjs",
+    "start": "node src/server.js",
+    "dev:edge": "wrangler dev --config apps/edge-runtime/wrangler.jsonc",
+    "deploy:spike-a": "wrangler deploy --config apps/edge-runtime/wrangler.jsonc --temporary",
+    "verify:spike-a": "tsx apps/verifier-runner/src/spike-a.ts",
+    "spike:b:dispatch": "tsx apps/spike-b-dispatcher/src/run.ts",
+    "test:legacy": "node --test tests/integration/server.test.js tests/unit/booking.test.js",
+    "test:unit": "vitest run --exclude='tests/**/*.test.js'",
+    "test": "npm run test:legacy && npm run test:unit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "convex": "^1.42.1",
+    "hono": "^4.10.8",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260712.1",
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^26.1.1",
+    "jsdom": "^29.1.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16",
+    "wrangler": "^4.58.0"
+  }
+}

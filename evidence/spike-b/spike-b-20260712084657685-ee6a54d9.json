@@ -1,0 +1,21 @@
+{
+  "evidenceCategory": "development-spike-b",
+  "countsAsFinalEvidence": false,
+  "runId": "spike-b-20260712084657685-ee6a54d9",
+  "siteId": "saturday-sessions",
+  "versionId": "spike-a-v1",
+  "specHash": "3505c5e50162d788e2a78eabe7afc6dd473a5e20e2c1fccd56ab699c7a05c42b",
+  "contractId": "spike-b-two-seat-external-ack-v1",
+  "expectedQuantity": 2,
+  "actorClass": "external-merchant",
+  "actorEligibilityAssertion": "Operator asserted this recipient is outside the builder/team and consented to this development acknowledgment request.",
+  "consentReceipt": "gateway-log-2026-07-12T14-14-10-external-merchant-consent",
+  "recipientIdentityHash": "86bc873f3eca7ddbaa6c083e1e4530020b1e927df2985a0e23c0cd5e00fa0350",
+  "correlationNonceHash": "4a2420d56a043434b98402b425b258c6482783e0a21611609dfba690e9c48c03",
+  "issuedAt": 1783846017685,
+  "expiresAt": 1783932417685,
+  "publicWorkerUrl": "https://proofgate-spike-a.bygone-piper.workers.dev",
+  "state": "failed",
+  "failure": "spawn EINVAL",
+  "failedAt": 1783846017710
+}

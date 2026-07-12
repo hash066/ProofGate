@@ -1,0 +1,42 @@
+{
+  "kind": "development-spike-a",
+  "countsAsFinalEvidence": false,
+  "runs": [
+    {
+      "attempt": 1,
+      "browserContext": "fresh-1",
+      "startedAt": "2026-07-12T07:52:23.188Z",
+      "finishedAt": "2026-07-12T07:52:24.274Z",
+      "targetUrl": "https://proofgate-spike-a.bygone-piper.workers.dev/s/saturday-sessions",
+      "status": "passed",
+      "httpStatus": 200,
+      "specHash": "3505c5e50162d788e2a78eabe7afc6dd473a5e20e2c1fccd56ab699c7a05c42b",
+      "screenshot": "C:\\Users\\Rayyan Shaikh\\Desktop\\Hermes\\evidence\\spike-a\\attempt-1.png",
+      "credentialCapabilities": "public-url-only; no mutation/deploy/provider/payment/promotion credentials"
+    },
+    {
+      "attempt": 2,
+      "browserContext": "fresh-2",
+      "startedAt": "2026-07-12T07:52:24.337Z",
+      "finishedAt": "2026-07-12T07:52:25.422Z",
+      "targetUrl": "https://proofgate-spike-a.bygone-piper.workers.dev/s/saturday-sessions",
+      "status": "passed",
+      "httpStatus": 200,
+      "specHash": "3505c5e50162d788e2a78eabe7afc6dd473a5e20e2c1fccd56ab699c7a05c42b",
+      "screenshot": "C:\\Users\\Rayyan Shaikh\\Desktop\\Hermes\\evidence\\spike-a\\attempt-2.png",
+      "credentialCapabilities": "public-url-only; no mutation/deploy/provider/payment/promotion credentials"
+    },
+    {
+      "attempt": 3,
+      "browserContext": "fresh-3",
+      "startedAt": "2026-07-12T07:52:25.485Z",
+      "finishedAt": "2026-07-12T07:52:26.520Z",
+      "targetUrl": "https://proofgate-spike-a.bygone-piper.workers.dev/s/saturday-sessions",
+      "status": "passed",
+      "httpStatus": 200,
+      "specHash": "3505c5e50162d788e2a78eabe7afc6dd473a5e20e2c1fccd56ab699c7a05c42b",
+      "screenshot": "C:\\Users\\Rayyan Shaikh\\Desktop\\Hermes\\evidence\\spike-a\\attempt-3.png",
+      "credentialCapabilities": "public-url-only; no mutation/deploy/provider/payment/promotion credentials"
+    }
+  ]
+}

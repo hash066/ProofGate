@@ -1,0 +1,11 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "proofgate-spike-a",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-12",
+  "workers_dev": true,
+  "preview_urls": true,
+  "vars": {
+    "CONVEX_URL": "https://vivid-warthog-67.eu-west-1.convex.cloud"
+  }
+}
