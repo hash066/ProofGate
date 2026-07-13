@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Proof Passport — Cafe Aroma</title>
+<style>
+:root{font-family:"DM Sans",system-ui,sans-serif;color:#22251f;background:#f2efe7}*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(circle at 12% 10%,#fff9dc,transparent 30%),#f2efe7;display:flex;flex-direction:column;align-items:center;padding:32px 16px}
+.wrap{width:min(760px,100%)}
+.bar{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+.mark{color:#bd4c2f;font-size:1.3rem}.brand{font-family:Georgia,serif;font-size:1.35rem}
+.card{border:1px solid #ded9cd;border-left:6px solid #d7a727;border-radius:20px;background:#fffdf9;box-shadow:0 20px 60px rgba(55,48,35,.10);padding:clamp(22px,4vw,36px)}
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.head h1{font-family:Georgia,serif;font-weight:400;font-size:1.7rem;margin:2px 0 0}
+.eyebrow{color:#bd4c2f;font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;margin:0}
+.state{display:inline-flex;align-items:center;padding:8px 16px;border-radius:999px;font-weight:700;font-size:.8rem;letter-spacing:.05em;background:#fbefd3;color:#8a5a12}
+.contract{margin:20px 0 6px;color:#4f514a;line-height:1.6}
+.reason{margin:14px 0 0;padding:12px 14px;border-radius:12px;background:#fbefd3;color:#8a5a12;font-weight:600;font-size:.92rem;line-height:1.5}
+ul{list-style:none;margin:20px 0 0;padding:0;display:grid;gap:10px}
+li{position:relative;padding-left:30px;color:#3b3d37;font-size:.94rem;line-height:1.45}
+li .i{position:absolute;left:0;top:0;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;font-size:.7rem;color:#fff}
+.ok{background:#4a9a41}.no{background:#d7a727}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;padding-top:16px;border-top:1px dashed #d6d2c9}
+.meta span{padding:5px 11px;border-radius:8px;background:#f2efe7;color:#6c6e66;font-size:.72rem;font-family:ui-monospace,monospace}
+.foot{margin:18px 2px 0;color:#83857d;font-size:.75rem;line-height:1.6}
+a{color:#bd4c2f}
+</style></head>
+<body><div class="wrap">
+<div class="bar"><span class="mark">⚕</span><span class="brand">ProofGate</span></div>
+<div class="card">
+  <div class="head">
+    <div><p class="eyebrow">Proof Passport</p><h1>Cafe Aroma — Latte tasting, Sat 4pm</h1></div>
+    <span class="state">● AMBER</span>
+  </div>
+  <p class="contract"><strong>Buyer contract:</strong> Reserve 1 seat for &quot;Latte tasting, Sat 4pm&quot; on mobile and reach an on-page confirmation.</p>
+  <div class="reason">Pending a real buyer witness. The build and the capability-separated verifier pass, but ProofGate will not turn this passport green until a genuine external booking is acknowledged through the signed booking oracle. This is the truthful state of a freshly built site.</div>
+  <ul>
+    <li><span class="i ok">✓</span>Merchant page built &amp; rendered from a Zod-valid SiteSpec</li>
+    <li><span class="i ok">✓</span>Buyer contract compiled &amp; capability-checked (cafe-aroma-buyer-journey)</li>
+    <li><span class="i ok">✓</span>Requested quantity within the seat limit (≤ 3)</li>
+    <li><span class="i ok">✓</span>Verifier ran capability-separated (no deploy / provider / payment secrets)</li>
+    <li><span class="i no">…</span>External booking witness acknowledged (real buyer/merchant)</li>
+  </ul>
+  <div class="meta">
+    <span>site cafe-aroma</span>
+    <span>version cafe-aroma-cb599d09</span>
+    <span>spec cb599d094fdf…</span>
+    <span>gate BLOCK [EXTERNAL_WITNESS]</span>
+    <span>oracle: booking</span>
+    <span>template mode (no LLM key)</span>
+  </div>
+</div>
+<p class="foot">
+  Merchant page: <a href="https://rides-min-logos-finger.trycloudflare.com/s/cafe-aroma.html">https://rides-min-logos-finger.trycloudflare.com/s/cafe-aroma.html</a><br>
+  Gate decided by <code>evaluatePromotion</code> (deterministic policy code) at 2026-07-12T10:58:17.744Z. Convex: persisted (passport projection = amber)<br>
+  The builder cannot approve its own work. Only a real acknowledged booking event promotes this passport to green; a regression flips it amber/red and rolls back.
+</p>
+</div></body></html>

@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "demo": "tsx scripts/demo-loop.mjs",
+    "intake": "tsx scripts/intake.mjs",
     "start": "node src/server.js",
     "dev:edge": "wrangler dev --config apps/edge-runtime/wrangler.jsonc",
     "deploy:spike-a": "wrangler deploy --config apps/edge-runtime/wrangler.jsonc --temporary",

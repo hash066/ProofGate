@@ -9,6 +9,7 @@
  */
 
 import type * as oracle from "../oracle.js";
+import type * as sites from "../sites.js";
 
 import type {
   ApiFromModules,
@@ -18,6 +19,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   oracle: typeof oracle;
+  sites: typeof sites;
 }>;
 
 /**
