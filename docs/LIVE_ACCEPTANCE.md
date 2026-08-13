@@ -5,16 +5,16 @@ Use only the account owner's real SME data, WhatsApp identity, supplied photos, 
 ## 0. Foundation receipts
 
 - [x] Convex development and production deployments exist; schema/functions were deployed to each with typechecking on 2026-08-08.
-- [x] The named Cloudflare Worker, KV namespace, production Convex configuration, Meta POST/send secrets, and foundation Hermes quick-tunnel origin have control-plane receipts. This is not a durable onboarding origin.
+- [x] The named Cloudflare Worker, KV namespace, production Convex configuration, Meta POST/send secrets, and durable AWS API Gateway/SQS Hermes origin have control-plane receipts.
 - [x] The no-card Convex File Storage fallback is deployed with immutable metadata validation, a 16 MiB cap, magic-byte checks, and merchant/backend collision rejection; R2 is not claimed.
 - [x] Public Worker HTTPS, foundation proof, and the exact WhatsApp GET challenge succeeded. A refreshed signed synthetic Worker-to-Hermes POST returned 200 after the AWS cutover; this proves transport only.
 - [x] Meta registered the test sender and accepted one approved template; its test-webhook panel recorded `sent` and `delivered` for the same provider message ID on 2026-08-09. This is outbound delivery evidence, not inbound merchant intake.
 - [x] A live merchant catalog message and three WhatsApp image messages reached the pre-AWS Hermes foundation on 2026-08-09. They are intake evidence, not publishable merchant assets or AWS-cutover acceptance.
 - [x] Meta verifies `GET /whatsapp/webhook`; the preserved raw-body/signature path accepted live signed messages on the pre-AWS foundation.
 - [x] AWS stack receipts identify the encrypted instance/EBS volume and private encrypted 30-day recordings bucket.
-- [x] Local Hermes reports exactly `v0.18.2`, the repository skill is linked/enabled, and the official Cloud adapter is configured. Its local health returns 200 with signature/verify configuration present and zero accepted messages.
-- [ ] Hermes is running on AWS behind an authenticated quick-tunnel origin. Replace it with a named tunnel/custom origin before clearing the durable-onboarding gate.
-- [x] The Vapi test squad was inspected in-provider on 2026-08-08: consent member artifacts are off, qualification member recording/logging/transcript are on, and the active imported number supports the US test country. No call has been placed.
+- [x] AWS Hermes reports exactly `v0.18.2`, the repository skill is linked/enabled, and the official Cloud adapter is configured. Its health returns 200 with signature/verify configuration present.
+- [x] Hermes is running on AWS behind a stable authenticated API Gateway/SQS ingress. The temporary quick tunnel is disabled.
+- [x] The Vapi squad was inspected in-provider: consent member artifacts are off, qualification recording/logging/transcript are on, and both assistants send only signed end-of-call reports to the Worker. No call has been placed.
 
 Record IDs and provider receipts in `EVIDENCE.md` without copying secrets, phone numbers, recordings, or raw WA-IDs.
 

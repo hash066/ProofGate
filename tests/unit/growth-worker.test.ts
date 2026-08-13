@@ -80,6 +80,18 @@ describe("growth Worker", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ service: "proofgate-edge", phase: "whatsapp-growth-p0", status: "ok" });
   });
+
+  it.each([
+    ["/privacy", "Axcas Privacy Policy"],
+    ["/data-deletion", "Delete your Axcas data"],
+    ["/terms", "Axcas Terms of Service"],
+  ])("serves the public legal page %s", async (path, heading) => {
+    const response = await createApp(undefined, boundary(), adminBoundary()).request(`http://proofgate.test${path}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(response.headers.get("cache-control")).toBe("public, max-age=3600");
+    expect(await response.text()).toContain(heading);
+  });
   it("registers exactly three social variants under one campaign approval", async () => {
     const admin = adminBoundary();
     const owner = "919876543210";

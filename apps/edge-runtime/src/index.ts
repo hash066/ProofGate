@@ -8,6 +8,7 @@ import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/dom
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
 import { renderBusinessSite } from "../../../packages/renderer/src/render-bakery-site";
 import { renderProductHome } from "../../../packages/renderer/src/render-product-home";
+import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from "../../../packages/renderer/src/render-legal";
 import { renderSite } from "../../../packages/renderer/src/render-site";
 import { authenticateVapiWebhook } from "../../../packages/calls/src/vapi";
 import { createQualificationCalls } from "../../../packages/calls/src/vapi-client";
@@ -350,6 +351,15 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   }));
+  const legalHeaders = {
+    "cache-control": "public, max-age=3600",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  } as const;
+  app.get("/privacy", (context) => context.html(renderPrivacyPolicy(), 200, legalHeaders));
+  app.get("/data-deletion", (context) => context.html(renderDataDeletion(), 200, legalHeaders));
+  app.get("/terms", (context) => context.html(renderTermsOfService(), 200, legalHeaders));
   app.get("/health", (context) => context.json({ service: "proofgate-edge", phase: "whatsapp-growth-p0", status: "ok" }));
   app.get("/s/:slug", async (context) => {
     const slug = context.req.param("slug");

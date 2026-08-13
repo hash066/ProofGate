@@ -22,20 +22,20 @@ are rejected rather than stored.
 | State and private media | Convex production | Tenant state and current no-R2 private asset storage |
 | Agent and rendering | AWS `ap-south-1` Ubuntu `t3.small` | Pinned Hermes, FFmpeg, scheduled reports |
 | Recordings | Private encrypted S3 | Consented call artifacts, deleted after 30 days |
-| Origin path | Named Cloudflare Tunnel | Authenticated Worker-to-Hermes ingress with no public EC2 port |
+| Origin path | AWS API Gateway + encrypted SQS | Authenticated Worker-to-Hermes ingress with no public EC2 port |
 
-Hermes and FFmpeg now run on the encrypted AWS instance. The Worker currently reaches
-that host through an AWS-side Cloudflare quick tunnel. This is suitable for controlled
-testing, but the random tunnel URL is not a durable customer-onboarding origin. Replace
-it with the staged named tunnel route before unrestricted onboarding.
+Hermes and FFmpeg run on the encrypted AWS instance. The Worker reaches that host
+through a stable AWS API Gateway endpoint which authenticates the Worker and places the
+unchanged Meta envelope in encrypted SQS. An outbound-only relay forwards it to Hermes.
+The temporary quick tunnel is disabled.
 
 ## Smallest launch sequence
 
 1. [Done] Deploy the encrypted AWS foundation in `ap-south-1` and install a pinned repository revision through SSM.
 2. [Done] Configure Hermes `v0.18.2`, FFmpeg, the official WhatsApp Cloud adapter, and the authenticated loopback origin.
-3. Connect the staged named Cloudflare Tunnel to the authenticated loopback origin on port `8080`, run it as a service, and rotate the Worker origin.
-4. Store only ProofGate operator secrets on the host and Worker; never merchant keys.
-5. Connect the production WhatsApp number and complete Meta production requirements.
+3. [Done] Deploy the authenticated API Gateway/SQS relay and rotate the Worker origin to it.
+4. [Done] Store only Axcas operator secrets on the host and Worker; never merchant keys.
+5. Connect the production WhatsApp number and complete Meta phone/OTP requirements.
 6. Run one real merchant from natural message to checked preview, approval,
    published page, tracked CTA, reel delivery, and metrics report.
 7. Keep calls and social auto-posting disabled until their separate live acceptance

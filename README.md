@@ -73,7 +73,7 @@ All administrative mutation routes are bearer-authenticated and intended only fo
 See [Production launch](docs/PRODUCTION_LAUNCH.md) for the no-customer-API-key model,
 server topology, launch sequence, and initial commercial packaging.
 
-Convex development and production are deployed with separate service secrets. The hardened no-card File Storage fallback was verified through the public Worker with one synthetic PNG and an idempotent replay; release separation correctly kept it private. Worker HTTPS, the WhatsApp GET challenge, and the authenticated AWS Hermes origin are live. R2 remains card-blocked and optional. The AWS quick tunnel is foundation-only; a named origin and one complete second-merchant acceptance run are still required before unrestricted onboarding.
+Convex development and production are deployed with separate service secrets. The hardened no-card File Storage fallback was verified through the public Worker with one synthetic PNG and an idempotent replay; release separation correctly kept it private. Worker HTTPS, the WhatsApp GET challenge, and the authenticated AWS Hermes origin are live. R2 remains card-blocked and optional. The durable origin is an AWS API Gateway ingress backed by encrypted SQS and an outbound-only EC2 relay; one complete second-merchant acceptance run is still required before unrestricted onboarding.
 
 See [architecture](docs/architecture.md), [provider readiness](docs/provider-readiness.md), [privacy and consent](docs/privacy-and-consent.md), and [evidence](EVIDENCE.md).
 The six-step live run and exact evidence requirements are in [live acceptance](docs/LIVE_ACCEPTANCE.md).
