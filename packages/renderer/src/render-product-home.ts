@@ -27,7 +27,7 @@ export function renderProductHome(): string {
         <div class="eyebrow">For small businesses</div>
         <h1>Your business online. No dashboard needed.</h1>
         <p class="lead">Send one WhatsApp message. Axcas turns your photos, offerings, and voice note into a verified business page with WhatsApp enquiries—then helps improve it.</p>
-        <div class="actions"><a class="button primary" href="#journey">See the merchant journey</a><a class="button secondary" href="#ready">What works today</a></div>
+        <div class="actions"><a class="button primary" data-pg="start-whatsapp" href="https://wa.me/15556537153?text=START%20AXCAS" rel="noopener noreferrer">Test Axcas in WhatsApp</a><a class="button secondary" href="#journey">See the merchant journey</a></div>
         <p class="micro">Tailors · tutors · salons · home services · retailers · bakeries · and more</p>
       </div>
       <div class="phone" aria-label="Demo WhatsApp conversation">
@@ -67,8 +67,9 @@ export function renderProductHome(): string {
         <div><h2>Demo journey — not live merchant proof.</h2><p>This page shows the customer experience. A real merchant site is published only after their own content passes verification and they approve it.</p></div>
         <div class="checks">
           <div class="check"><strong>Working:</strong> WhatsApp intake, tenant isolation, catalog generation, verification, approvals, tracked CTAs, metrics, reel pipeline.</div>
-          <div class="check"><strong>Controlled beta:</strong> up to Meta-approved test recipients while production access is completed.</div>
-          <div class="check"><strong>Still gated:</strong> Meta production setup, durable Hermes hosting, live Vapi call acceptance, and social publishing credentials.</div>
+          <div class="check"><strong>Live foundation:</strong> AWS-hosted Hermes is live and the public Worker forwards through a fail-closed authenticated origin.</div>
+          <div class="check"><strong>Controlled beta:</strong> Meta-approved test recipients can complete the WhatsApp flow while production access is completed.</div>
+          <div class="check"><strong>Still gated:</strong> a durable named origin, Meta production access, and consented Vapi call acceptance.</div>
         </div>
       </div>
     </section>

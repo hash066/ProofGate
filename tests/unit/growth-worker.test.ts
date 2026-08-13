@@ -61,8 +61,12 @@ describe("growth Worker", () => {
     expect(html).toContain("Axcas — WhatsApp business agent");
     expect(html).toContain("Axcas agent");
     expect(html).toContain("Send one WhatsApp message");
+    expect(html).toContain('data-pg="start-whatsapp"');
+    expect(html).toContain('href="https://wa.me/15556537153?text=START%20AXCAS"');
     expect(html).toContain("Photos + offerings + voice note");
     expect(html).toContain("Private beta");
+    expect(html).toContain("AWS-hosted Hermes is live");
+    expect(html).not.toContain("durable Hermes hosting");
     expect(html).toContain("For small businesses");
     expect(html).toContain("The agent identifies your business type");
     expect(html).toContain("Demo journey — not live merchant proof");

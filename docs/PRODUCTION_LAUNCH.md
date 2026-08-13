@@ -24,20 +24,21 @@ are rejected rather than stored.
 | Recordings | Private encrypted S3 | Consented call artifacts, deleted after 30 days |
 | Origin path | Named Cloudflare Tunnel | Authenticated Worker-to-Hermes ingress with no public EC2 port |
 
-The current Hermes/FFmpeg origin is a laptop and quick tunnel. It is foundation-only:
-sleeping or disconnecting the laptop stops agent replies.
+Hermes and FFmpeg now run on the encrypted AWS instance. The Worker currently reaches
+that host through an AWS-side Cloudflare quick tunnel. This is suitable for controlled
+testing, but the random tunnel URL is not a durable customer-onboarding origin. Replace
+it with the staged named tunnel route before unrestricted onboarding.
 
 ## Smallest launch sequence
 
-1. Activate the AWS account and authenticate an owner-controlled AWS CLI session.
-2. Run `npm run aws:deploy -- -RepositoryCommit FULL_PUSHED_40_CHARACTER_SHA`; it validates and deploys `infra/aws/cloudformation.yaml` in `ap-south-1` and installs the exact ProofGate revision through SSM.
-3. Configure the pinned Hermes Cloud adapter and the ProofGate-owned host secrets.
-4. Connect the staged named Cloudflare Tunnel to the authenticated loopback origin on port `8080`, run it as a service, and rotate the Worker origin.
-5. Store only ProofGate operator secrets on the host and Worker; never merchant keys.
-6. Connect the production WhatsApp number and complete Meta production requirements.
-7. Run one real non-bakery merchant from natural message to checked preview, approval,
+1. [Done] Deploy the encrypted AWS foundation in `ap-south-1` and install a pinned repository revision through SSM.
+2. [Done] Configure Hermes `v0.18.2`, FFmpeg, the official WhatsApp Cloud adapter, and the authenticated loopback origin.
+3. Connect the staged named Cloudflare Tunnel to the authenticated loopback origin on port `8080`, run it as a service, and rotate the Worker origin.
+4. Store only ProofGate operator secrets on the host and Worker; never merchant keys.
+5. Connect the production WhatsApp number and complete Meta production requirements.
+6. Run one real merchant from natural message to checked preview, approval,
    published page, tracked CTA, reel delivery, and metrics report.
-8. Keep calls and social auto-posting disabled until their separate live acceptance
+7. Keep calls and social auto-posting disabled until their separate live acceptance
    and compliance gates pass.
 
 ## Commercial starting point
