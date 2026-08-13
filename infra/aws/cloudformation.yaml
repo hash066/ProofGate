@@ -60,7 +60,7 @@ Resources:
     Properties:
       ImageId: !Ref UbuntuAmi
       InstanceType: t3.small
-      IamInstanceProfile: { Name: !Ref HermesProfile }
+      IamInstanceProfile: !Ref HermesProfile
       SecurityGroupIds: [!GetAtt HermesSecurityGroup.GroupId]
       MetadataOptions:
         HttpEndpoint: enabled
