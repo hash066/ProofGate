@@ -1,11 +1,36 @@
 # ProofGate Build Bible
 
-Status: final build specification  
+Status: amended final build specification
 Primary track: AI as Agency  
 Product category: self-verifying launch agency  
 MVP vertical: one-page workshop, event, booking, or lead page  
-Primary operator surface: Telegram through Hermes  
+Primary operator surface: WhatsApp Business Cloud through Hermes
 Build window: eight hours  
+
+## 2026-08-13 approved SME scope amendment
+
+ProofGate serves English-speaking small businesses, starting with constrained types:
+home bakery, tailor, tutor, salon, home service, retailer, and `other`. The merchant
+does not select a template or complete a form. Hermes infers the type from one natural
+WhatsApp bundle containing any available voice note, text, offerings, prices, area,
+and real photos. It may ask at most one consolidated follow-up for all facts required
+to publish; it must not run a one-question-at-a-time interview.
+
+The merchant receives one verified preview and makes one exact release decision.
+Routine reversible extraction, asset ingestion, drafting, verification, reporting,
+and improvement analysis continue under the persisted decision policy. The existing
+capability-separated release, evidence, consent, reel, and call rules remain unchanged.
+This is a constrained SME site system, not a free-form website builder.
+
+## 2026-08-06 approved scope amendment
+
+The current P0 vertical is one English home bakery operated entirely through WhatsApp voice notes, photos, text, and signed approval buttons. Hermes `v0.18.2` performs multimodal intake, memory, structured content, reel strategy, and monitoring, but crosses into product state only through the typed `proofgate` command boundary. Cloudflare owns Meta webhook authentication, tracked public routes, private R2 delivery, and the `workers.dev` site; Convex remains durable state.
+
+Merchant interaction uses one append-only `DecisionPolicyV1`, normally `fast_pilot`. Deterministic policy allows reversible intake, drafting, candidate creation, verification requests, reel-angle drafting, metrics, and improvement proposals without repeated confirmation. Release, final reel rendering, and each immutable call batch still require their exact signed approval. Lead scraping, payments, auto-posting, and synthetic product-media publication are always denied. A policy change appends a version that names the policy it supersedes.
+
+The release path remains immutable and capability-separated. Builder output is `BusinessBriefV1`, `SiteSpecV2`, or an allowlisted candidate; it cannot set green. Merchant approval binds an exact hash. Calls are limited to supplied, non-revoked, purpose-consented India/US leads and one attempt per approved batch. A two-member Vapi squad asks recording consent before any recording. Reels use supplied assets, AWS Polly (Kajal, Aditi fallback), and FFmpeg; they are returned on WhatsApp and never auto-posted. No dashboard, payments, lead scraping, synthetic product imagery, or unapproved publishing is in P0.
+
+Where later sections refer to Telegram booking, ElevenLabs, Dodo, or general verticals, this amendment governs implementation priority. The underlying verifier/release/evidence rules remain mandatory.
 
 This document is both the product specification and the execution brief for Hermes. Treat MUST, MUST NOT, and Definition of Done statements as acceptance criteria. Build the smallest complete proof loop before adding polish.
 

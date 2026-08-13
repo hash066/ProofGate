@@ -1,5 +1,7 @@
 # ProofGate system architecture
 
+> The approved WhatsApp home-bakery P0 and current as-built boundaries are summarized in [architecture.md](architecture.md). Where this historical general architecture discusses Telegram booking or payments, the 2026-08-06 Build Bible amendment governs the implemented P0.
+
 > The launch agency that cannot approve its own work.
 >
 > This document explains the target production design and the current implementation truth. [PROOFGATE_BUILD_BIBLE.md](../PROOFGATE_BUILD_BIBLE.md) remains the product authority; [EVIDENCE.md](../EVIDENCE.md) remains the authority for what has actually been proven.

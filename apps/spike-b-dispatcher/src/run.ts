@@ -63,8 +63,9 @@ async function main(): Promise<void> {
     process.env.PROOFGATE_WORKER_URL ?? localEnvironment.PROOFGATE_WORKER_URL,
   );
   const secret = localEnvironment.BOOKING_SESSION_SECRET;
-  const convexUrl = localEnvironment.CONVEX_URL ?? "https://vivid-warthog-67.eu-west-1.convex.cloud";
+  const convexUrl = localEnvironment.CONVEX_URL;
   if (!secret) throw new Error("BOOKING_SESSION_SECRET is missing from .env.local");
+  if (!convexUrl) throw new Error("CONVEX_URL is missing from .env.local");
 
   const publicPage = await fetch(`${workerBaseUrl}/s/saturday-sessions`, { redirect: "error" });
   if (!publicPage.ok) throw new Error(`Public Worker returned HTTP ${publicPage.status}`);

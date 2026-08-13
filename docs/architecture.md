@@ -1,13 +1,62 @@
-# Architecture
+# WhatsApp growth architecture
 
-> Read the complete architecture, trust model, workflow pipelines, state machine, route design and truthful implementation map in [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md).
+## Trust boundaries
 
-Authoritative spec: [PROOFGATE_BUILD_BIBLE.md](../PROOFGATE_BUILD_BIBLE.md) §5 (lifecycle/state machine), §6 (hard architecture decisions), §7 (stack/repository), §8 (Hermes integration), §9 (domain model), §10 (capability separation & release authority), §11 (external event truth), §12 (Convex data model), §13 (agent organisation).
+```text
+Merchant WhatsApp
+  -> Cloudflare Worker (Meta signature + sender-bound approvals)
+     -> ordinary media/text/voice unchanged -> Hermes v0.18.2 on AWS
+        -> one isolated session per authenticated WA-ID
+        -> Worker-derived opaque merchant ID; models cannot choose tenant identity
+        -> active merchant decision policy
+           -> reversible drafts/verification/metrics: allow without another prompt
+           -> publish/call/final reel: exact signed approval
+           -> prohibited action: deny
+        -> typed proofgate CLI -> authenticated Worker admin routes -> Convex File Storage
+     -> public site / tracked CTA / Proof Passport
 
-This file is filled DURING the build with the as-built record:
+Convex immutable candidate -> independent verifier -> deterministic release policy
+                                                -> production pointer / passport
 
-- [ ] Hermes capability matrix (bible §0 rule 1 + §8: what actually exists in this install — gateway, delegation, cron, browser, memory APIs)
-- [ ] What the Hermes adapter/skill boundary wraps, and why each call
-- [ ] Deviations from the bible (each with reason + what replaced it)
-- [ ] Deploy pipeline as-built (canary → promote), with real URLs
-- [ ] External event path as-built (Dodo/Telegram → verification → promotion → passport)
+Approved call batch -> atomic guardian claim -> Vapi consent squad -> qualification squad
+                                                     -> signed structured outcome -> Convex
+
+Approved reel -> atomic guardian claim -> AWS Polly + FFmpeg -> ffprobe -> private storage/WhatsApp
+
+Three reel variants -> one immutable social-campaign hash -> one merchant approval
+                   -> Instagram publishing remains disabled until provider readiness
+                   -> 2h/24h/72h normalized metrics -> winner or insufficient signal
+```
+
+Hermes can interpret multimodal input and propose typed artifacts. It has no Convex mutation or release credential. The builder cannot verify, the verifier cannot mutate or promote, and passport state is derived from immutable version, hash, contract, approval, and release facts.
+
+`DecisionPolicyV1` is created once at onboarding and stored as an append-only merchant record. A deterministic evaluator, not the model, returns `allow`, `require_approval`, or `deny`. Fast-pilot policy removes repeated prompts for reversible work while preserving exact hash-bound approvals for release, calls, and final reel rendering. Updating preferences appends a policy that explicitly supersedes the active version.
+
+## Data flow
+
+- `BusinessBriefV1` binds the hashed owner, inferred SME type, separate order number, business facts, and product/service draft.
+- The public intake accepts business fields only. The Worker normalizes and hashes the authenticated Meta sender, then injects its deterministic opaque merchant ID. Every later merchant route rejects a mismatched tenant before mutation.
+- Site slugs have an immutable merchant owner. Assets receive a tenant-prefixed canonical ID, while metrics, verification capabilities, releases, calls, reels, and campaigns resolve only inside that tenant.
+- Photos enter the hardened Convex File Storage foundation fallback under immutable asset IDs. The 16 MiB policy verifies magic bytes plus storage metadata SHA/size/type and rejects merchant/backend collisions. Raw storage URLs remain server-side; the public asset route resolves only IDs selected by a published spec. R2 remains an optional later backend.
+- `SiteSpecV2` is canonicalized and hashed. The renderer treats every field as untrusted text and emits no merchant scripts.
+- Page views and CTA clicks are append-only. A random first-party session value is hashed before ingestion; IP addresses are not stored.
+- The tracked CTA resolves the published version/item, records source and campaign, then redirects to the exact prefilled `wa.me` message.
+- Approval taps are accepted only from a valid Meta-signed body, a pending unexpired approval, and the bound merchant sender hash.
+- Scraping leads, accepting payments, automatic social posting, and publishing synthetic product media are denied regardless of merchant policy.
+- The social experiment boundary accepts exactly three distinct reel assets and schedules under one scope hash. It scores watch, meaningful-engagement, and CTA-click rates against raw reach at 2, 24, and 72 hours. This removes repeated approvals while keeping provider publication disabled until an Instagram Professional account and scoped token are verified.
+
+## Call safety
+
+`LeadConsentV1` permits only India/US, a single qualification purpose, consent evidence, and a local calling window. The batch hash includes the exact lead IDs, countries, script version, time window, attempt limit, and cost cap. The guardian atomically stamps `dispatchedAt` before contacting Vapi, preventing retry-driven duplicate calls.
+
+The consent assistant disables recording, logs, and transcript. The qualification assistant begins only after explicit recording consent, identifies itself as AI, and never accepts payment. A declined recording ends the call; do-not-call revokes the lead immediately. Only structured outcomes and optional private 30-day artifact references persist.
+
+## Reel safety
+
+A plan references supplied asset IDs and claims only. Approval is bound to the canonical plan hash. The AWS worker atomically claims the plan, synthesizes English-India voice with Polly Kajal/Aditi, renders 1080×1920 H.264/AAC from the approved asset root, and checks dimensions/codecs/duration with ffprobe. It returns the file privately and has no social publishing credential.
+
+## Deployment
+
+Cloudflare is deployed to serve the bakery and Meta webhook on `workers.dev` and owns KV; public HTTPS, foundation proof, and the GET verification protocol are verified. Convex development and production remain separate, with production holding the scoped File Storage fallback. R2 is inactive, card-blocked, and optional. AWS is intended to host Hermes/FFmpeg and the private 30-day recording bucket after account activation. A quick tunnel is allowed only for foundation testing; external onboarding requires a named tunnel or stable custom origin.
+
+Convex, storage fallback, Worker HTTPS, and GET verification have foundation receipts. The Meta app/signed messages, AWS, named Hermes origin, real merchant assets, and production catalog acceptance remain gated. Exact receipts and verification state belong in `EVIDENCE.md`.

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPOSITORY_URL="${1:?Usage: install-runtime.sh REPOSITORY_URL REPOSITORY_COMMIT}"
+REPOSITORY_COMMIT="${2:?Usage: install-runtime.sh REPOSITORY_URL REPOSITORY_COMMIT}"
+
+if [[ "${EUID}" -ne 0 ]]; then
+  echo "install-runtime.sh must run as root" >&2
+  exit 2
+fi
+if [[ ! "${REPOSITORY_URL}" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?$ ]]; then
+  echo "repository URL must be an explicit HTTPS GitHub repository" >&2
+  exit 2
+fi
+if [[ ! "${REPOSITORY_COMMIT}" =~ ^[a-f0-9]{40}$ ]]; then
+  echo "repository commit must be a full 40-character SHA" >&2
+  exit 2
+fi
+
+install -d -o proofgate -g proofgate /opt/proofgate
+if [[ ! -d /opt/proofgate/ProofGate/.git ]]; then
+  sudo -u proofgate git clone --filter=blob:none "${REPOSITORY_URL}" /opt/proofgate/ProofGate
+fi
+
+sudo -u proofgate git -C /opt/proofgate/ProofGate fetch --depth 1 origin "${REPOSITORY_COMMIT}"
+sudo -u proofgate git -C /opt/proofgate/ProofGate checkout --detach "${REPOSITORY_COMMIT}"
+test "$(sudo -u proofgate git -C /opt/proofgate/ProofGate rev-parse HEAD)" = "${REPOSITORY_COMMIT}"
+sudo -u proofgate npm --prefix /opt/proofgate/ProofGate ci --ignore-scripts
+
+install -d -o proofgate -g proofgate /home/proofgate/.hermes/skills
+ln -sfn /opt/proofgate/ProofGate/hermes/skills/proofgate /home/proofgate/.hermes/skills/proofgate
+
+install -d -m 0750 -o root -g proofgate /etc/proofgate
+if [[ ! -e /etc/proofgate/origin.env ]]; then
+  install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/origin.env
+fi
+install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-origin.service /etc/systemd/system/proofgate-hermes-origin.service
+install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared.service /etc/systemd/system/proofgate-cloudflared.service
+systemctl daemon-reload
+systemctl enable proofgate-hermes-origin.service
+systemctl enable proofgate-cloudflared.service
+
+echo "Runtime installed. Add the operator secrets, configure Hermes and the named-tunnel route, then start services."

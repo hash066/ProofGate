@@ -1,5 +1,11 @@
 # Hermes capability matrix
 
+> 2026-08-08 amendment: the installed runtime reports `v0.18.2 (2026.7.7.2)`, local commit `88a58ff1`, install method `git`. The signed `v2026.7.7.2` release resolves to `9de9c25f620ff7f1ce0fd5457d596052d5159596`; the old `fb402106` claim was wrong because that commit contains `v0.20.0`. It exposes `whatsapp-cloud`, `gateway`, `cron`, skills, memory, and voice transcription commands. The repository `proofgate` skill is linked and enabled, but only the legacy Baileys adapter is configured locally; the official Meta Cloud adapter has zero configuration keys. The gateway is stopped. WhatsApp Business Cloud is the P0 channel; historical findings below remain audit context only.
+
+> Continuation: official cloudflared `2026.7.3` is present at `C:\Users\asus\AppData\Local\ProofGate\bin\cloudflared.exe` with verified SHA-256 `8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841`. It has not been started and proves neither a tunnel nor a reachable Hermes origin.
+
+> Latest 2026-08-08 runtime audit supersedes that continuation: the official Cloud adapter now has all required configuration names, a foreground `hermes gateway --accept-hooks run` process listens on `127.0.0.1:8090`, and cloudflared is running a foundation quick tunnel whose `/health` returns 200. Health reports zero accepted, duplicate, or rejected-signature messages. `hermes gateway status` still says stopped because no managed gateway service is installed; it does not detect the foreground process. No live WhatsApp message is claimed. AWS and a durable named origin remain deferred.
+
 Recorded at build start: **2026-07-12 13:11 IST**  
 Session: `20260712_130611_5d7887`  
 Authoritative references checked from the current Hermes upstream docs: Telegram, delegation, cron, and memory pages (source hashes retained below).
@@ -19,8 +25,8 @@ Authoritative references checked from the current Hermes upstream docs: Telegram
 | Memory | Built-in memory active, no external provider | Use only for compact operational lessons. Convex remains authoritative product state. |
 | Skills | Active path `C:/Users/Rayyan Shaikh/AppData/Local/hermes/skills`; no ProofGate skill installed yet | Create repository skill, then install/symlink after its scripts exist. |
 | Terminal | Local Bash/MSYS on Windows; Node available; npm available; pnpm absent | Use npm workspaces and POSIX shell syntax. |
-| Cloudflare CLI | `wrangler` not globally installed; `npx wrangler@latest` works; unauthenticated; temporary public deploy supported | Spike A may use a clearly labeled temporary Cloudflare URL. Final production requires account authentication/token. |
-| Convex CLI | `npx convex@latest` works; no deployment configured | Mandatory Spike B and authoritative state are blocked pending Convex project authentication/configuration. |
+| Cloudflare CLI | `npx wrangler` works; account authentication succeeded and `PROOFGATE_CONFIG` KV exists as of 2026-08-08 | R2, named Worker, secrets, durable URL, and named tunnel still require deployment receipts. |
+| Convex CLI | Development `earnest-mandrill-823` and production `tame-corgi-404` deployed with typechecking; separate service secrets configured | Use development for verification and production for the Worker; preserve durable-row acceptance receipts. |
 
 ## Hermes doctor summary
 

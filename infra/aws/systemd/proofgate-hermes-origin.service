@@ -1,0 +1,25 @@
+[Unit]
+Description=ProofGate authenticated Hermes origin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proofgate
+Group=proofgate
+WorkingDirectory=/opt/proofgate/ProofGate
+Environment=NODE_ENV=production
+Environment=PROOFGATE_ORIGIN_HOST=127.0.0.1
+Environment=PROOFGATE_ORIGIN_PORT=8080
+Environment=HERMES_UPSTREAM_URL=http://127.0.0.1:8090/whatsapp/webhook
+EnvironmentFile=/etc/proofgate/origin.env
+ExecStart=/usr/bin/npm run start --workspace @proofgate/hermes-origin-proxy
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

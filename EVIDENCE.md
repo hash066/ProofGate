@@ -4,6 +4,434 @@ Format per PROOFGATE_BUILD_BIBLE.md §26: one row per claim. **Live surfaces and
 
 ## Claims
 
+### WhatsApp bakery foundation — 2026-08-06
+
+| Claim | Inspectable proof | Status |
+|---|---|---|
+| Typed WhatsApp bakery boundary | `packages/domain/src/growth.ts`, `apps/proofgate-cli`, unit tests | ✓ repository evidence |
+| Meta signature and sender-bound approval interception | `packages/whatsapp-io`, Worker tests | ◐ live GET challenge passed; signed POST/message receipt pending |
+| Constrained catalog and tracked order CTA | renderer/Worker tests | ◐ Worker HTTPS/foundation proof verified; merchant catalog acceptance pending |
+| Immutable consented batch and at-most-once guardian claim | release policy, Convex guardian, tests/typecheck | ✓ repository evidence; Vapi live test pending |
+| Consent-first Vapi squad and signed callback | `packages/calls` and tests | ✓ repository evidence; provider IDs pending |
+| Polly/FFmpeg reel path | Polly fallback test, renderer/ffprobe code | ✓ repository evidence; AWS render pending |
+| Private reel return through WhatsApp | Meta media upload/send adapter, authenticated Worker route, provider/Worker tests | ✓ repository evidence; live Meta media/message receipts pending |
+| Storage/Cloudflare foundation | Convex storage policy, live Worker/Convex receipts | ✓ synthetic fallback path verified; merchant assets and acceptance pending |
+| Persisted merchant decision engine | `packages/domain/src/decision-policy.ts`, append-only Convex table, Worker/CLI routes, 9 policy tests | ◐ production code deployed; first real merchant policy record pending intake |
+| Three-variant social experiment boundary | `packages/social`, `socialCampaigns` Convex table, Worker/CLI routes and tests | ◐ production foundation deployed; no Instagram credential, post, or insight receipt |
+
+External account receipts, resource IDs, URLs, provider message IDs, call IDs, and rendered asset hashes must be appended after live acceptance. Definitions and local tests are not external proof.
+
+Customer-facing product home deployment on 2026-08-13: the legacy root redirect to
+`/s/saturday-sessions` was removed. Cloudflare Worker version
+`bb430cfc-7458-4ad4-ac2f-d940f654213b` now serves a responsive, CSP-restricted
+WhatsApp merchant journey at
+`https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev/`. The live response
+returned HTTP 200, contained `data-pg="product-home"` and the expected journey copy,
+and contained no `Saturday Sessions` copy. The page explicitly labels itself a demo,
+not live merchant proof. TypeScript passed and the full repository suite passed 3
+legacy tests plus 96 Vitest tests before deployment.
+
+Meta readiness inspection on 2026-08-13: Step 1 remains completed with the existing
+test number, recipient, and historical webhook events. Opening Step 2 redirected to
+Meta's `Developer Platform Blocked User Error` with the authoritative prompt
+`Account confirmation needed` and a `Confirm Account` action. Production setup and
+business verification cannot proceed until the account owner completes that Meta
+confirmation. No confirmation form was submitted and no production-readiness claim
+is made.
+
+SME generalization on 2026-08-13: `BusinessBriefV1` now accepts the constrained
+business types `home_bakery`, `tailor`, `tutor`, `salon`, `home_service`, `retailer`,
+and `other`; pricing may be omitted and renders truthfully as `Contact for price`.
+The same XSS-safe renderer selects neutral product/service labels without permitting
+agent-authored page code. Hermes' repository skill and live WhatsApp Cloud platform
+hint now require inferred business type, one natural input bundle, at most one
+consolidated follow-up, one checked preview, and one exact publish approval. Worker
+version `7184ff46-a0cc-4433-bfd7-c602cc792e00` deployed this schema and the generalized
+customer home. Live root and Worker health returned HTTP 200; the page contained
+`For small businesses` and the inference explanation and contained no
+`For home bakeries`. Local Hermes was restarted and returned HTTP 200 Cloud-adapter
+health. TypeScript and the full 3 legacy + 98 Vitest suite passed. No non-bakery
+merchant acceptance has occurred yet.
+
+After the account owner completed Meta account confirmation, the app list became
+accessible again and showed ProofGate in `In development` mode, superseding the prior
+blocked-account state. The Production Setup route was then opened directly and
+reloaded once, but remained on progress placeholders while the page console reported
+Meta-side `Failed to fetch`. No production number, review submission, or mode change
+is claimed from that failed load.
+
+Social experiment foundation deployment on 2026-08-09: production Convex
+`tame-corgi-404` accepted the append-only `socialCampaigns` table and its two indexes.
+Cloudflare Worker version `6e483ee9-01fc-4492-ab01-efad4d014e00` first deployed the route at the named
+`workers.dev` URL with the existing encrypted secrets and production Convex/KV bindings.
+After normal edge propagation, unauthenticated `POST /internal/social-campaign` returned
+HTTP 401, proving the new route is live and fail-closed. The implementation accepts
+exactly three immutable reel assets/schedules under one campaign hash and one signed
+merchant approval; changing a variant changes the hash. The scorer compares raw-reach
+denominators and watch, meaningful-engagement, and CTA-click rates at 2, 24, and 72
+hours, returning insufficient signal when the three 72-hour samples are not comparable.
+Repository verification passed 3 legacy tests and 84 Vitest tests plus application and
+Convex typechecking before deployment. No Instagram account, access token, published
+post, insight, or automatic posting claim is made.
+Worker version `0a183b3f-2376-4c36-81ef-09dcfcf3d0e8` then replaced the stale
+`spike-b` health label with truthful phase `whatsapp-growth-p0`; no campaign behavior
+or provider credential changed in that follow-up deployment.
+
+Live bakery catalog intake on 2026-08-09: the allowlisted merchant sent one catalog
+message and three images through WhatsApp Cloud. Hermes health advanced to
+`accepted=3`, `duplicates=1`, `rejected_signature=0` before the controlled gateway
+restart. The cached media comprised exactly three JPEGs, and Hermes extracted the
+following supplied catalog facts: Sourdough Loaf at ₹180 with 24-hour lead time in
+Hubli city limits; Chocolate Cupcakes (pack of six) at ₹250 with 12-hour lead time in
+Hubli and Dharwad; Garlic Breadsticks (pack of four) at ₹150 with same-day lead time
+for orders before 2 PM in Hubli. The three images visibly contain a `Made with AI`
+disclosure. They are therefore preserved only as private intake evidence and are not
+registered or claimed as publishable merchant product assets.
+
+The live agent incorrectly answered the incoming bundle with generic menu/flyer and
+spreadsheet options and used zero product-boundary tool turns. The failure is preserved
+rather than counted as a candidate. Diagnosis found that busy follow-ups were configured
+to interrupt and the gateway workspace was not pinned to this repository. Hermes was
+changed through its official config interface to queue follow-ups, suppress the verbose
+busy notice, use `E:\Projects\axcas` as `terminal.cwd`, and replace the WhatsApp Cloud
+platform hint with the bakery-only decision flow. The installed gateway restarted as
+PID `100956`; local Cloud health returned HTTP 200 with signature/app-secret/FFmpeg
+ready. A real follow-up turn is still required to prove the corrected behavior.
+
+Multi-tenant hardening on 2026-08-09: ProofGate now normalizes the authenticated Meta
+sender, hashes it, and derives a deterministic opaque merchant ID at the Worker. Intake
+no longer accepts model-selected identity. Policy, decision, candidate, verification,
+release, lead, call-batch, reel, social-campaign, asset, and metrics routes require the
+same derived tenant; mismatches fail before mutation. New sites have an immutable
+merchant owner, and uploaded local asset names become globally unique tenant-scoped
+asset IDs. Full local verification passed 3 legacy tests and 95 Vitest tests, application
+TypeScript, and `git diff --check`. Convex development accepted the new
+`sites.by_merchant_slug` index with typechecking. These are isolation receipts, not a
+claim that Meta App Review or public multi-user onboarding is complete.
+
+Hermes' WhatsApp Cloud DM policy was set to `open` through its official configuration
+and the gateway restarted as PID `73604`. This is currently constrained by Meta's
+development recipient controls and the signed Worker webhook; it allows multiple
+OTP-approved testers without hard-coding one Hermes allowlist. A durable named origin,
+Meta production review, and a second real merchant acceptance are still required before
+claiming general availability.
+
+Production multi-tenant deployment on 2026-08-09: Convex production
+`tame-corgi-404` accepted `sites.by_merchant_slug` and the tenant-aware functions with
+schema validation and typechecking. Cloudflare Worker version
+`fb7be906-ed7c-466d-ac4c-8a6539f7b520` deployed to the named `workers.dev` URL.
+Post-deploy checks returned HTTP 200 with phase `whatsapp-growth-p0`; anonymous intake
+returned 401, authenticated intake without a sender returned 400, and an authenticated
+sender presenting a forged merchant ID returned 403 before schema persistence. Local
+Hermes health remained HTTP 200. These checks prove the live boundary fails closed;
+they do not prove a second merchant completed onboarding.
+
+Installed Hermes source review confirms gateway turns bind
+`HERMES_SESSION_USER_ID`, platform, message ID, and chat identity through task-local
+context variables, and its local subprocess bridge injects those values into each
+terminal command without sharing a process-global merchant identity. This supports the
+ProofGate CLI's per-message sender header under concurrent merchant sessions. It is
+source/runtime-contract evidence; the second-merchant live test remains open.
+
+Decision-policy deployment on 2026-08-09: production Convex `tame-corgi-404`
+accepted the append-only `decisionPolicies` table and its two indexes. Worker version
+`63457ccc-d9a3-415f-8865-60c28d5aae32` deployed at
+`https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev`. Public health
+returned HTTP 200; unauthenticated policy access returned HTTP 401; an authenticated
+request for the deliberately absent `policy-smoke` merchant returned HTTP 409 with
+`merchant_policy_not_configured`. Application TypeScript, Convex TypeScript, 3 legacy
+tests, and 75 Vitest tests passed; `git diff --check` passed. These receipts prove the
+deployed decision boundary and fail-closed missing-policy behavior. They do not prove
+a real merchant policy or autonomous merchant action; those remain pending complete
+merchant intake.
+
+The same Worker deployment preserved all 11 encrypted secrets and the Convex/KV
+bindings, but—as expected from its local configuration—did not preserve the prior
+API-added plain-text `HERMES_ORIGIN_URL`. The still-running foundation tunnel
+`https://sara-version-try-vic.trycloudflare.com` returned HTTP 200 health with the
+official WhatsApp Cloud adapter. Its URL was therefore stored under KV key
+`hermes_origin`, which the Worker already uses as its durable configuration fallback;
+a confirming remote KV read matched exactly. This restores forwarding configuration
+without another code deployment. It remains a quick tunnel, not an onboarding-grade
+origin, and no synthetic or live message was sent during this check.
+
+WhatsApp ingress diagnosis on 2026-08-09 found the app-level WABA webhook callback
+active at the public Worker, and the WABA `subscribed_apps` edge included ProofGate,
+but the subscription returned no fields. A Graph API update added the required
+`messages` field; the confirming read returned active callback plus
+`fields=[{name: messages, version: v26.0}]`. A signed, non-allowlisted synthetic
+fixture was then replayed twice through the public Worker. Both requests returned HTTP
+200 and Hermes' duplicate counter increased from 1 to 2 while `accepted` remained 0,
+which is expected because authorization gating drops the fixture sender before the
+accepted counter. This proves the Worker/KV/tunnel/Hermes raw-body path without
+contacting a real user. A fresh real merchant `START` message is still required for
+the live accepted receipt.
+
+Live WhatsApp ingress passed on 2026-08-09 after the `messages` subscription fix.
+The allowlisted merchant sent `START`; Hermes logged the inbound WhatsApp Cloud turn
+for merchant display name `Harshita`, health incremented to `accepted=1` with zero
+signature rejections, the agent completed one model turn, and the Cloud adapter sent a
+65-character reply that the merchant supplied as a WhatsApp screenshot. This is the
+first real Meta → Worker → KV origin → quick tunnel → Hermes → Meta reply receipt. The
+initial reply was generic, so it is ingress evidence rather than bakery-intake proof.
+
+The merchant chat is now persisted as `WHATSAPP_CLOUD_HOME_CHANNEL` without recording
+the raw WA-ID here. The ProofGate skill description and Hermes WhatsApp Cloud platform
+hint now bind `START`, `START BAKERY`, photos, prices, and voice notes to the bakery
+onboarding flow and explicitly forbid generic-assistant responses. Hermes was moved
+from the unmanaged foreground process to its installed Windows-login gateway and
+restarted healthy; the channel directory reports one WhatsApp Cloud home target and
+the foundation tunnel remains healthy. A separate-process `hermes send` attempt was
+preserved as a failure: the installed Cloud adapter has no standalone sender function,
+so proactive CLI delivery is unavailable even while the live gateway is connected.
+No outbound onboarding message is claimed from that failed attempt.
+
+Provider foundation update on 2026-08-08: Convex development deployment
+`earnest-mandrill-823` (`https://earnest-mandrill-823.convex.cloud`) completed
+`convex dev --once` with typechecking, and production deployment `tame-corgi-404`
+(`https://tame-corgi-404.convex.cloud`) completed `convex deploy -y` with typechecking.
+`PROOFGATE_SERVICE_SECRET` is configured separately on both; no secret value is stored
+here. Cloudflare authentication succeeded and KV namespace `PROOFGATE_CONFIG` was
+created with ID `bfed66f79c9a4e66adf345f4dce3c113`; Wrangler now binds that exact ID.
+These receipts do not prove a Worker, R2 bucket, public site, webhook, or live event.
+The 2026-08-08 repository re-audit passed application and Convex TypeScript checks,
+3 legacy tests plus 57 Vitest tests, and a Wrangler dry run that resolved the exact KV
+binding plus the declared R2 bucket binding. The acceptance preflight remained blocked
+because live runtime/provider variables are absent and the local URL intentionally
+selects development rather than production.
+
+Vapi foundation evidence on 2026-08-08: active free US number `+17609748059` has
+provider ID `3a84a4af-53a6-4baa-9eed-ace2f0a73731`. Consent assistant
+`e7210ebf-91f8-48eb-8cf9-6587b91fe88e` has recording, logging, and transcript all
+disabled. Qualification assistant `f48272d7-fc58-4433-9b0a-8b51ecdbda10` has
+recording, logging, and transcript enabled. Squad
+`492a8fae-b1ec-4d60-b221-1d7115a53eef` has exactly two members and a consent-first
+handoff. The API key was verified and persisted outside the repository. These are
+provider configuration receipts only: no call was placed, no lead was contacted, and
+neither consent outcome has live acceptance evidence yet.
+
+Account-gated provider audit on 2026-08-08: Meta developer registration completed and
+business portfolio `ProofGate` (`911844841419654`) was created, but the portfolio is
+unverified. WhatsApp app creation reached the final Overview; no Meta app was created
+because the account owner must personally review the Meta Platform Terms and Developer
+Policies and click **Create app**. Cloudflare R2 activation reached its secure billing
+page but remains inactive pending card/address entry and two billing confirmations.
+AWS CloudFormation access remains blocked by incomplete/free account setup: payment
+method, identity, and support-plan activation are required and AWS states activation
+may take up to 24 hours. No R2 bucket, Worker, AWS stack, Meta app, call, or message was
+created or sent beyond creation of the Meta business portfolio.
+
+No-card storage and Worker deployment update on 2026-08-08: the Convex File Storage
+foundation fallback was implemented with a 16 MiB cap, file-signature checks, Convex
+metadata SHA-256/size/content-type validation, and rejection of cross-merchant or
+backend collisions. Application and Convex typechecks, the Wrangler dry run, and the
+then-current 66-test suite passed. Production Convex deployment `tame-corgi-404` deployed successfully
+after the storage policy module was renamed to `asset_policy`.
+
+Cloudflare Worker `proofgate-whatsapp-growth` deployed from code version
+`d1c1a59b-761f-4e66-9c2d-3f73ba4289e0`; the current secret-change deployment is
+`927f1614-6b2f-42cc-8120-8d143f80ab85` at
+`https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev`. The account
+subdomain and script were enabled through the Cloudflare API; the deployment has the
+created KV binding, production Convex configuration, and eight runtime secrets. Secret
+values are not recorded. DNS resolves and the Cloudflare control plane reports the
+script enabled, but the initial public HTTPS check failed during the TLS handshake.
+That initial result was control-plane evidence only and was superseded by the successful
+foundation checks recorded immediately below. R2 remains unactivated and no R2 bucket
+is claimed; the foundation fallback uses Convex File Storage.
+
+No-R2 fallback verification completed on 2026-08-08 against production Convex
+`tame-corgi-404` through
+`https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev`. Synthetic 1×1 PNG
+asset `foundation_asset_verified_20260808` returned HTTP 201 with `inserted=true` and
+the Convex backend; an exact replay returned HTTP 201 with `inserted=false`. The public
+asset route returned HTTP 404 because this asset is not selected by a promoted
+production `SiteSpec`, which is the expected release/publish separation. The foundation
+proof request returned HTTP 200, and the WhatsApp GET verification handshake returned
+HTTP 200 with the exact challenge. These checks verify the infrastructure foundation,
+not merchant intake or messaging.
+
+Current local verification is 3 legacy tests plus 64 Vitest tests, with application
+and Convex typechecks and the Wrangler dry run passing. Failed-registration test cases
+may have left unregistered orphan objects in Convex File Storage; those objects are
+cleanup debt and are not live proof. R2 remains unactivated/card-blocked and is optional
+later, not required for the current foundation path.
+
+Provider continuation audit on 2026-08-08: Meta's new-app flow is at the final
+Overview for app name `ProofGate`, with only **Connect with customers through
+WhatsApp** selected and unverified business portfolio `ProofGate` connected. The UI
+identified no additional requirements. The final **Create app** button explicitly
+accepts the Meta Platform Terms and Developer Policies and has not been clicked.
+Consequently there is no Meta app ID, app secret, WhatsApp number, registered webhook,
+or message receipt.
+
+AWS console access in `ap-south-1` redirected to `/billing/signup/incomplete` and lists
+payment method, identity verification, and support-plan setup as incomplete. No AWS
+resource was created. Local Hermes remains verified at `v0.18.2` with the repository
+skill linked/enabled, but the official Cloud adapter still has no `WHATSAPP_CLOUD_*`
+configuration. Official cloudflared `2026.7.3` was downloaded to
+`C:\Users\asus\AppData\Local\ProofGate\bin\cloudflared.exe`; SHA-256
+`8635da433b6df8194746e88ed9d2589566c20e38bfc2a80e431a348b7c765841` matched the
+official release. The binary has not been started, no tunnel or origin exists, and this
+is readiness evidence only—not Hermes deployment or live messaging.
+
+Authenticated Wrangler continuation recheck confirmed exactly eight remote Worker
+secret names: `HERMES_PROXY_SECRET`, `META_VERIFY_TOKEN`, `PROOFGATE_DATA_KEY`,
+`PROOFGATE_SERVICE_SECRET`, `VAPI_API_KEY`, `VAPI_PHONE_NUMBER_ID`, `VAPI_SQUAD_ID`,
+and `VAPI_WEBHOOK_SECRET`. Values were not read or recorded. Required Meta secrets
+`META_APP_SECRET`, `META_PHONE_NUMBER_ID`, and `META_ACCESS_TOKEN` are absent. KV lookup
+for `hermes_origin` returned 404 Not Found, and no Worker Hermes origin is set. The
+successful GET challenge therefore does not prove signed POST verification, Meta send,
+or Hermes forwarding; all three remain blocked and no message was sent.
+
+Latest Meta state on 2026-08-08: unpublished app `ProofGate` exists with App ID
+`2349611939193122` under business portfolio `911844841419654`, and the app dashboard is
+reachable. WhatsApp customization is at its initial **Continue** screen, offering a
+test number while explicitly requiring acceptance of Facebook Terms for WhatsApp
+Business and Meta Hosting Terms for Cloud API. Continue was not clicked. App Settings
+Basic confirmed the App ID and displayed only a masked App Secret. Selecting **Show**
+requested password re-entry; no password was entered, and no app secret was read or
+stored. No WABA, test phone, Phone Number ID, access token, webhook registration, or
+message exists. AWS work remains deferred by user direction. This supersedes the prior
+no-app state but does not establish WhatsApp readiness.
+
+Meta continuation on 2026-08-08: the WhatsApp Business and Meta Hosting terms were
+accepted. The app secret was retrieved from Meta and stored only as encrypted Worker
+secret `META_APP_SECRET`; its value is not present in this repository or ledger. Meta's
+API-testing credential panel remained stuck on Loading/progress after direct navigation
+and one reload, while the browser console reported `Failed to fetch`. Consequently no
+Phone Number ID, access token, WABA ID, webhook registration, or live message was
+obtained. This advances signature-secret readiness only and is not WhatsApp acceptance.
+
+Meta credential-panel continuation on 2026-08-08: the API-testing panel ultimately
+loaded and showed verified test number `+1 (555) 653-7153`, Phone Number ID
+`1322968257556615`, and WABA ID `1488251739723645`. `META_PHONE_NUMBER_ID` is now stored
+as an encrypted Worker secret; its value is recorded here only because the provider ID
+is a non-secret resource identifier. Access token status remains **Not generated yet**.
+Multiple automated activation attempts produced no token and no popup, so
+`META_ACCESS_TOKEN`, webhook registration, and live WhatsApp messaging remain blocked.
+No app-secret value is included in this ledger.
+
+Meta webhook continuation on 2026-08-08: a real public GET challenge was sent to the
+`workers.dev` callback using the actual stored `META_VERIFY_TOKEN`; the token was not
+printed or recorded. The Worker returned HTTP 200 and the response matched the
+challenge exactly. Meta Step 2 was filled with that callback and verify token. The
+automated save interaction redirected to `permissions#auto_subscribe`, but Meta's UI
+became unresponsive before an authoritative saved state or **Remove subscription**
+control could be observed. The endpoint handshake is passed; Meta webhook registration
+remains unconfirmed. No signed POST or message receipt exists.
+
+Meta/Hermes foundation continuation on 2026-08-08: two generated Meta user tokens both
+debugged valid for app `2349611939193122` with `public_profile`,
+`whatsapp_business_management`, and `whatsapp_business_messaging`. The selected
+short-lived token expiring `2026-08-08T18:00:00Z` was successfully exchanged through
+Meta OAuth for a valid extended user token expiring `2026-10-07T16:53:08Z` with the
+same WhatsApp permissions. Worker `META_ACCESS_TOKEN` was rotated to the extended token;
+Hermes configuration was updated and its gateway restarted. No token value is stored
+in this repository or ledger.
+
+Graph phone lookup returned HTTP 200 for test number `+1 555-653-7153` / Phone Number
+ID `1322968257556615`. Meta app subscriptions now show an active
+`whatsapp_business_account` callback exactly at the public Worker `/whatsapp/webhook`.
+WABA `subscribed_apps` POST succeeded, and the confirming GET lists ProofGate app
+`2349611939193122`. This supersedes the earlier unconfirmed-subscription state.
+
+Local Hermes `v0.18.2` official Cloud adapter is configured with its required
+phone/token/app-secret/app-id/WABA/verify-token/API-v26 fields. Two existing exact
+legacy allowed-user identities were copied into the Cloud allowlist without recording
+their values. The gateway runs on `127.0.0.1:8090`; local health returned HTTP 200 and
+the challenge matched. Official cloudflared is running at foundation quick tunnel
+`https://pursue-campus-cordless-developers.trycloudflare.com`, whose health and
+challenge both returned HTTP 200. Worker `HERMES_ORIGIN_URL` points to that origin.
+
+A signed synthetic Worker-to-Hermes POST initially returned HTTP 500 during
+propagation; retry, and a post-token-rotation retry, returned HTTP 200 with an empty
+response. These are synthetic transport checks—not live Meta proof. No WhatsApp message
+was sent and no live signed Meta delivery was observed. The quick tunnel is
+foundation-only; a named durable origin is required before external onboarding. The
+full suite remains 67/67 passing from the prior verified turn.
+
+Foundation runtime refresh on 2026-08-09: the previous quick tunnel had expired and the
+gateway was stopped. The obsolete Baileys adapter was explicitly disabled with Hermes'
+configuration command while the official WhatsApp Cloud adapter remained configured.
+Hermes `v0.18.2` was restarted on `127.0.0.1:8090`; local health returned HTTP 200 with
+platform `whatsapp_cloud`, configured verification/app-secret state, FFmpeg present,
+and zero accepted live messages. A new foundation-only cloudflared origin,
+`https://flag-examinations-isa-valuation.trycloudflare.com`, returned HTTP 200 health.
+
+The signed-in Cloudflare dashboard showed the old origin but kept its Deploy control
+disabled after a valid edit. The authenticated official Worker settings API was used
+instead: a PATCH replaced only `HERMES_ORIGIN_URL` and inherited every other binding
+from the latest version. A confirming GET returned all 15 original bindings, including
+the unchanged secret and KV bindings, and the new origin. Tunnel health and Worker
+health both returned HTTP 200. A newly signed **synthetic** Worker-to-Hermes webhook
+POST returned HTTP 200 with an empty body. This proves the refreshed transport only;
+it is not a Meta delivery or merchant intake.
+
+Meta Graph phone lookup again returned test number `+1 555-653-7153`; the stored token
+identified app `ProofGate` (`2349611939193122`). WABA subscription POST returned
+`success: true`, and the confirming GET included ProofGate in the nested
+`whatsapp_business_api_data` entries. The Meta testing UI currently has no recipient
+number selected or stored, so its Send message control is disabled and adding one
+requires the merchant's phone number plus Meta's verification step. No message was
+sent, no provider message ID exists, and live signed delivery remains open.
+
+Meta live-test continuation on 2026-08-09: the merchant completed Meta's recipient OTP
+for the verified test recipient. The first official Graph send failed truthfully with
+Meta error `133010` (`Account not registered`). The test sender was then registered
+through Meta's `/register` API; the generated six-digit registration PIN is stored only
+in the local ignored Hermes environment as `WHATSAPP_CLOUD_REGISTRATION_PIN` and is not
+included in this ledger or repository. Registration returned `success: true`.
+
+The approved Meta `jaspers_market_order_confirmation_v1` test template was accepted
+with provider message ID
+`wamid.HBgMOTE4OTA0MTE3NzY4FQIAERgSMDYxNkMzNjU3ODNCRTRCRjY2AA==`. Meta's test-webhook
+panel then displayed two real `messages` events for that exact ID at
+`2026-08-09 19:44:26 IST`: status `sent`, followed by status `delivered`. These are
+real outbound/provider events, not an inbound merchant intake. Hermes still reported
+zero accepted inbound messages.
+
+The merchant WA-ID was absent from the Hermes Cloud allowlist even though two legacy
+identities were present. It was added without recording the number in this ledger,
+and Hermes was restarted successfully with HTTP 200 `whatsapp_cloud` health. The prior
+quick tunnel had expired during the flow. Replacement foundation origin
+`https://sara-version-try-vic.trycloudflare.com` is healthy, and the Worker settings API
+confirmed that `HERMES_ORIGIN_URL` now points to it while all 15 bindings remain. A
+merchant reply is still required to prove live inbound signed delivery and Hermes
+intake. The quick tunnel remains unsuitable for external onboarding.
+
+Inbound provider evidence on 2026-08-09: Meta's test-webhook panel recorded two real
+events from the OTP-verified merchant after the outbound template was delivered. The
+first was text `START BAKERY` with provider message ID
+`wamid.HBgMOTE4OTA0MTE3NzY4FQIAEhggQUM0RDZEMDA5OUY3NDIzQTY4NEUwRDM1NUZDMzFERkEA`.
+The second was a WhatsApp voice note (`audio/ogg; codecs=opus`) with provider message ID
+`wamid.HBgMOTE4OTA0MTE3NzY4FQIAEhggQUM0OTBEMjE1Q0IxQjdEQzUxNDVGOTMzODRDRDQ0RUEA`.
+No attachment URL or merchant number is stored in this repository or ledger.
+
+This is authoritative Meta event evidence, but it is **not yet Hermes receipt proof**:
+after the events, both local and tunneled Hermes health remained HTTP 200 with
+`accepted=0`, `duplicates=0`, and `rejected_signature=0`. The merchant has now been
+allowlisted and the gateway restarted, so sender policy is no longer the missing
+configuration. The Worker-to-Hermes leg for these two real events remains open for
+diagnosis; neither event is claimed as ingested or transcribed.
+
+AWS/Hermes readiness audit on 2026-08-06: the AWS CLI was not installed, no `AWS_*` environment credential names or configured profiles were present, and boto3 returned `credential_source_present False`. Consequently no AWS API mutation ran and no stack, EC2 instance, S3 bucket, IAM role, or external ID is claimed. Static source review confirmed `infra/aws/cloudformation.yaml` declares a `t3.small` host, encrypted 24 GiB gp3 root volume, a security group with egress and no ingress, a private AES-256/versioned S3 bucket with 30-day current/noncurrent expiry, and IAM limited to Polly synthesis plus that bucket's objects. An isolated `cfn-lint` installation attempt timed out and was terminated; authenticated `validate-template` remains required before deployment. Local Hermes reports `v0.18.2 (2026.7.7.2)`, upstream `392e3a8c`, local `88a58ff1`; the version-controlled `proofgate` skill was installed as a junction into the active Hermes home and `hermes skills list` reported it `local / enabled`. The gateway remained stopped and no message was sent.
+
+AWS/Hermes re-audit on 2026-08-08: the AWS CLI remains absent, there are no AWS environment/profile credentials, and boto3 again returned no credential source; no AWS API or mutation was attempted. Local Hermes is `v0.18.2 (2026.7.7.2)` at carried commit `88a58ff1`; a moving remote-tracking revision is not used as the deployment pin. The signed `v2026.7.7.2` tag resolves to commit `9de9c25f620ff7f1ce0fd5457d596052d5159596` and declares `v0.18.2`. The old infrastructure pin `fb402106` was inspected and declares `v0.20.0`; the template was corrected before deployment. The ProofGate skill junction target and installed file hash both equal `7E0A80988DC85DA22E6D7DC849407D7B55CD2A5175A2C4962449E03BC80FB553`, and Hermes reports it local/enabled. The active environment contains only legacy `WHATSAPP_*` Baileys keys and zero `WHATSAPP_CLOUD_*` keys; local “WhatsApp configured” is therefore not Meta Cloud readiness. Gateway status is stopped, cloudflared is absent, FFmpeg is present, and no message or public gateway was started.
+
+Local foundation verification on 2026-08-06: a clean `npm ci` completed from the regenerated lock, TypeScript passed for the application and Convex growth module, 3 legacy tests plus 53 Vitest tests passed, and Wrangler successfully bundled the Worker in dry-run mode with the declared private R2 binding. This is repository/build evidence only.
+
+Historical Cloudflare/Convex deployment audit on 2026-08-06: `npx wrangler whoami`
+returned `You are not authenticated`; no Cloudflare or Convex provider environment
+variables, `.env.local`, Wrangler profile, or Convex profile were present. Therefore no
+Worker, R2 bucket, KV namespace, Convex project, or Convex deployment was created or
+claimed. Wrangler dry-run produced the Worker bundle (741.84 KiB / 125.06 KiB gzip)
+with the declared `PROOFGATE_ASSETS` R2 binding, and strict TypeScript compilation of
+`convex/schema.ts` plus `convex/growth.ts` passed. CLI-validated account-owner commands
+are preserved in `infra/cloudflare/README.md` and `infra/convex/README.md`; these are
+local validation receipts, not external deployment evidence. This historical state was
+superseded by the 2026-08-08 provider foundation update above.
+
 | Claim | Live proof | Backup | Status | Owner |
 |---|---|---|---|---|
 | Hermes eligibility (coding partner) | Session `20260712_130611_5d7887`; capability audit and three restricted architecture workstreams delegated | Screenshots | ◐ development evidence recorded | Launch Manager |
@@ -35,6 +463,15 @@ Format per PROOFGATE_BUILD_BIBLE.md §26: one row per claim. **Live surfaces and
 
 ## Development gate evidence
 
+- Production-path hardening on 2026-08-13 rejects unknown customer credential fields in both `BusinessBriefV1` and `SiteSpecV2`; regression tests specifically cover `customerApiKey` and `customerAccessToken`. The intake boundary strips authenticated server identity fields before parsing strict merchant input. Full local verification passed TypeScript, 3 legacy tests, and 98 Vitest tests (101/101 total).
+- Cloudflare Worker version `bf89666b-4e1e-4b6e-9ec2-319450e2a8b7` is deployed at `https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev`. A fresh public check returned HTTP 200 for `/`, title `ProofGate — WhatsApp growth agent`, heading `Your business online. No dashboard needed.`, and `/health` phase `whatsapp-growth-p0` with status `ok`.
+- The signed-in Cloudflare dashboard accepted the name `proofgate-hermes-production` and reached **Setup Environment / Waiting for your Tunnel to connect**. No connector has connected, Continue remains disabled, and no durable tunnel is claimed. This step is intentionally left at the connector boundary until the approved AWS host exists; the current quick tunnel/laptop origin remains foundation-only.
+- Production hosting hardening on 2026-08-13 added an authenticated loopback Hermes origin. It accepts only `POST /whatsapp/webhook`, compares the Worker proxy secret in constant time, caps the body at 2 MiB, preserves the exact Meta body and `X-Hub-Signature-256`, removes the proxy secret before forwarding to Hermes, and exposes only a minimal health response. Focused tests passed 4/4; a real local service smoke check returned HTTP 200 health and HTTP 401 without the Worker credential.
+- The AWS path now includes a fail-closed PowerShell deployer, commit-pinned Linux runtime installer, restricted systemd services, and pinned cloudflared `2026.7.3` binary SHA-256 `9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17`. The deployer requires an authenticated AWS identity, validates CloudFormation, waits for SSM, installs an exact pushed 40-character repository commit, and never accepts merchant credentials. These are source/static receipts only; AWS is still not activated and no stack or named-tunnel connector is claimed.
+- Clean `npm ci`, TypeScript, 3 legacy tests, and 107 Vitest tests passed (110/110 total). `npm audit --omit=dev` reports zero production vulnerabilities after upgrading Hono to the fixed release line. Cloudflare Worker version `ef4f59e4-783b-4dc5-a54c-abb14425bf0f` was then deployed; fresh root/health/CSP checks passed and a wrong webhook verification token returned HTTP 403.
+- Customer-facing rebrand on 2026-08-13 changed the public and WhatsApp identity to **Axcas** while retaining ProofGate as the internal verification engine and preserving all stable commands, headers, approval IDs, infrastructure names, and callback URLs. Full verification remained 110/110 passing. Worker version `71974026-a4dc-4854-ae13-504376929df0` deployed successfully; the live root returned HTTP 200, title `Axcas — WhatsApp business agent`, seven Axcas brand references, no visible `ProofGate` brand element, and the existing CSP.
+- AWS continuation on 2026-08-13: the account owner reported signup steps complete, but this machine still has no AWS CLI and the fresh `ap-south-1` console opened at the AWS IAM/root sign-in form. Account activation and identity therefore remain unverified. No CloudFormation validation or mutation ran, and no stack, EC2 instance, EBS volume, IAM role, S3 bucket, Systems Manager command, or named-tunnel connection is claimed. The next gate is an authenticated console session supplied directly by the account owner.
+
 - Mandatory development Spike B passed on run `spike-b-20260712095158729-e1282552` with a consenting external merchant. Convex independently verified the signed submission, Hermes recorded recipient-bound Telegram provider message ID `20`, the external merchant consumed the single-use capability, and the deterministic projection returned `green / EXACT_EXTERNAL_ACKNOWLEDGMENT` with submitted, dispatched, and acknowledged predicates all true. Evidence: `evidence/spike-b/spike-b-20260712095158729-e1282552.json` and `evidence/spike-b/spike-b-20260712095158729-e1282552-completion.json`. This passes the mandatory development gate but does **not** count as final production or judging evidence.
 - Earlier development Spike B runs `spike-b-20260712084907167-13815d3f` and `spike-b-20260712085751067-cefc221a` remain preserved. Run `...cefc221a` received a genuine external acknowledgment, but its pre-hardening dispatch identity format did not satisfy the recipient-bound oracle and is not counted as the passing gate run.
 - Failed Spike B attempts `spike-b-20260712084657685-ee6a54d9` and `spike-b-20260712084701490-833d51fe` are preserved with the real `spawn EINVAL` failure. The dispatcher now invokes the Convex JavaScript entrypoint through the active Node runtime instead of spawning `npx.cmd`.
@@ -52,11 +489,12 @@ Format per PROOFGATE_BUILD_BIBLE.md §26: one row per claim. **Live surfaces and
 
 ## Truthful fallbacks in force
 
-- Cloudflare account authentication is absent. Spike A uses a real **temporary** Workers URL and is explicitly development-only; it is not final production evidence.
-- Convex development configuration and append-only persistence are present. Mandatory development Spike B is green for run `spike-b-20260712095158729-e1282552`; this does not establish production readiness or final evidence.
-- The original `bygone-piper` temporary Worker URL no longer resolves. The current `roasted-joke` Worker is reachable but temporary and must be reverified before any future consented dispatch.
+- Cloudflare authentication and the named Worker exist; public HTTPS, foundation proof, and the GET verification protocol have now responded successfully. This is foundation evidence, not merchant acceptance.
+- Convex File Storage is the current no-card private-asset fallback. It is capped at 16 MiB and is not an R2, signed-URL, or unlimited-storage claim.
+- Convex development and production are deployed. Mandatory historical Spike B remains development evidence and does not establish current WhatsApp acceptance.
+- The historical `bygone-piper`, `roasted-joke`, and quick-tunnel URLs are not substitutes for verifying the current named Worker.
 - ElevenLabs and Linkup credentials are absent. No provider claim is made.
 - Dodo live mode is unavailable; booking acknowledgment remains the core external-oracle path.
 - The passing development Spike B binds the consent-receipt reference, canonical Telegram recipient hash, provider message ID, signed session, exact quantity, immutable version/spec hash, and external merchant acknowledgment. Team/local actions still cannot satisfy the real-witness predicate.
 - Preserved Spike A failure: `evidence/spike-a/failures.ndjson` records an actual transient HTTP 500 on attempt 2 before the successful three-run sequence.
-- Public live URL (temporary): `https://rides-min-logos-finger.trycloudflare.com` serves the Saturday Sessions booking page (HTTP 200, all `data-pg` handles present). This is **NOT** a real Cloudflare Workers deploy — Cloudflare account auth is still absent and `.env` is blank. It is a **temporary cloudflared quick tunnel to the local `node src/server.js` on `127.0.0.1:4173`**, established 2026-07-12 10:17Z (UTC). The URL dies when the local server or the `cloudflared` process stops, and trycloudflare quick-tunnel hostnames are ephemeral; reverify before relying on it.
+- Historical quick tunnel `https://rides-min-logos-finger.trycloudflare.com` served the old Saturday Sessions page on 2026-07-12. It was ephemeral and is not current ProofGate evidence.

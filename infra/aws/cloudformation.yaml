@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ProofGate Hermes/FFmpeg host and private 30-day call-recording storage
+Parameters:
+  UbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+Resources:
+  RecordingsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteConsentedRecordingsAfter30Days
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 }
+      VersioningConfiguration: { Status: Enabled }
+  HermesRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: ProofGateReelsAndRecordings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [polly:SynthesizeSpeech]
+                Resource: '*'
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub '${RecordingsBucket.Arn}/*'
+  HermesProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: { Roles: [!Ref HermesRole] }
+  HermesSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Outbound-only ProofGate Hermes host; Cloudflare Tunnel creates the ingress path
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+  HermesHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref UbuntuAmi
+      InstanceType: t3.small
+      IamInstanceProfile: { Name: !Ref HermesProfile }
+      SecurityGroupIds: [!GetAtt HermesSecurityGroup.GroupId]
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 24
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - { Key: Name, Value: proofgate-hermes }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl ffmpeg git python3-venv python3-pip nodejs npm
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+          echo '9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17  /usr/local/bin/cloudflared' | sha256sum -c -
+          chmod 0755 /usr/local/bin/cloudflared
+          useradd --create-home --shell /bin/bash proofgate
+          install -d -o proofgate -g proofgate /opt/proofgate
+          sudo -u proofgate git clone https://github.com/NousResearch/hermes-agent.git /opt/proofgate/hermes-agent
+          cd /opt/proofgate/hermes-agent
+          sudo -u proofgate git checkout 9de9c25f620ff7f1ce0fd5457d596052d5159596
+          sudo -u proofgate python3 -m venv venv
+          sudo -u proofgate venv/bin/pip install --upgrade pip
+          sudo -u proofgate venv/bin/pip install -e .
+          ln -s /opt/proofgate/hermes-agent/venv/bin/hermes /usr/local/bin/hermes
+          if ! snap list amazon-ssm-agent >/dev/null 2>&1; then
+            snap install amazon-ssm-agent --classic
+          fi
+          systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service
+          printf 'Hermes Agent v0.18.2 (v2026.7.7.2) pinned at 9de9c25f620ff7f1ce0fd5457d596052d5159596\n' >/opt/proofgate/HERMES_PIN
+Outputs:
+  InstanceId: { Value: !Ref HermesHost }
+  RecordingsBucketName: { Value: !Ref RecordingsBucket }
+  AWSRegion: { Value: !Ref 'AWS::Region' }

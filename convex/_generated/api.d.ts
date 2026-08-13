@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as asset_policy from "../asset_policy.js";
+import type * as growth from "../growth.js";
 import type * as oracle from "../oracle.js";
 import type * as sites from "../sites.js";
 
@@ -18,6 +20,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  asset_policy: typeof asset_policy;
+  growth: typeof growth;
   oracle: typeof oracle;
   sites: typeof sites;
 }>;

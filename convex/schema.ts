@@ -4,12 +4,15 @@ import { v } from "convex/values";
 export default defineSchema({
   sites: defineTable({
     slug: v.string(),
+    merchantId: v.optional(v.string()),
     canaryVersionId: v.optional(v.string()),
     productionVersionId: v.optional(v.string()),
     previousCertifiedVersionId: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_slug", ["slug"]),
+  })
+    .index("by_slug", ["slug"])
+    .index("by_merchant_slug", ["merchantId", "slug"]),
 
   siteVersions: defineTable({
     siteId: v.id("sites"),
@@ -83,4 +86,199 @@ export default defineSchema({
     bookingSessionId: v.id("bookingSessions"),
     createdAt: v.number(),
   }).index("by_site", ["siteId"]),
+
+  merchants: defineTable({
+    merchantId: v.string(),
+    ownerWaIdHash: v.string(),
+    name: v.string(),
+    timezone: v.string(),
+    orderWhatsAppNumberCiphertext: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_merchant_id", ["merchantId"])
+    .index("by_owner_wa_hash", ["ownerWaIdHash"]),
+
+  decisionPolicies: defineTable({
+    policyId: v.string(),
+    merchantId: v.string(),
+    ownerWaIdHash: v.string(),
+    policyJson: v.string(),
+    policyHash: v.string(),
+    supersedesPolicyId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_policy_id", ["policyId"])
+    .index("by_merchant_created", ["merchantId", "createdAt"]),
+
+  mediaAssets: defineTable({
+    assetId: v.string(),
+    merchantId: v.string(),
+    storageBackend: v.optional(v.union(v.literal("r2"), v.literal("convex"))),
+    objectKey: v.optional(v.string()),
+    convexStorageId: v.optional(v.id("_storage")),
+    sha256: v.string(),
+    contentType: v.string(),
+    byteLength: v.number(),
+    sourceProviderMessageId: v.string(),
+    publicApprovedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_asset_id", ["assetId"])
+    .index("by_merchant", ["merchantId"]),
+
+  growthEvents: defineTable({
+    eventId: v.string(),
+    type: v.union(v.literal("page_view"), v.literal("whatsapp_cta_click")),
+    siteId: v.string(),
+    versionId: v.string(),
+    specHash: v.string(),
+    sessionHash: v.string(),
+    itemId: v.optional(v.string()),
+    source: v.optional(v.string()),
+    campaign: v.optional(v.string()),
+    occurredAt: v.number(),
+  })
+    .index("by_event_id", ["eventId"])
+    .index("by_site_time", ["siteId", "occurredAt"])
+    .index("by_site_version", ["siteId", "versionId"]),
+
+  verificationCapabilities: defineTable({
+    tokenHash: v.string(),
+    merchantId: v.optional(v.string()),
+    siteId: v.string(),
+    versionId: v.string(),
+    specHash: v.string(),
+    expiresAt: v.number(),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  }).index("by_token_hash", ["tokenHash"]),
+
+  growthVerifications: defineTable({
+    evidenceId: v.string(),
+    siteId: v.string(),
+    versionId: v.string(),
+    specHash: v.string(),
+    runId: v.string(),
+    reportHash: v.string(),
+    passed: v.boolean(),
+    blockers: v.array(v.string()),
+    observedAt: v.number(),
+  })
+    .index("by_evidence_id", ["evidenceId"])
+    .index("by_site_version", ["siteId", "versionId"]),
+
+  approvals: defineTable({
+    approvalId: v.string(),
+    merchantId: v.string(),
+    type: v.union(v.literal("release"), v.literal("call_batch"), v.literal("reel"), v.literal("social_campaign")),
+    scopeHash: v.string(),
+    ownerWaIdHash: v.string(),
+    providerMessageId: v.string(),
+    decision: v.union(v.literal("pending"), v.literal("approved"), v.literal("denied")),
+    decidedAt: v.optional(v.number()),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_approval_id", ["approvalId"])
+    .index("by_merchant", ["merchantId"]),
+
+  leadConsents: defineTable({
+    leadId: v.string(),
+    merchantId: v.string(),
+    phoneCiphertext: v.string(),
+    phoneHash: v.string(),
+    country: v.union(v.literal("IN"), v.literal("US")),
+    purpose: v.literal("ai_qualification_call"),
+    source: v.string(),
+    evidenceHash: v.string(),
+    grantedAt: v.number(),
+    revokedAt: v.optional(v.number()),
+    localTimezone: v.string(),
+    callWindowStartHour: v.number(),
+    callWindowEndHour: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_lead_id", ["leadId"])
+    .index("by_phone_hash", ["phoneHash"])
+    .index("by_merchant", ["merchantId"]),
+
+  callBatches: defineTable({
+    batchId: v.string(),
+    merchantId: v.string(),
+    scopeHash: v.string(),
+    leadIds: v.array(v.string()),
+    countries: v.array(v.union(v.literal("IN"), v.literal("US"))),
+    scriptVersion: v.string(),
+    earliestAt: v.number(),
+    latestAt: v.number(),
+    maxAttemptsPerLead: v.number(),
+    costCapUsd: v.number(),
+    approvalId: v.string(),
+    dispatchedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_batch_id", ["batchId"])
+    .index("by_merchant", ["merchantId"]),
+
+  callOutcomes: defineTable({
+    providerCallId: v.string(),
+    batchId: v.string(),
+    leadId: v.string(),
+    recordingConsent: v.union(v.literal("granted"), v.literal("declined"), v.literal("not_reached")),
+    outcome: v.union(v.literal("qualified"), v.literal("not_interested"), v.literal("no_answer"), v.literal("failed"), v.literal("do_not_call")),
+    interest: v.optional(v.string()),
+    timing: v.optional(v.string()),
+    product: v.optional(v.string()),
+    objection: v.optional(v.string()),
+    followUpRequested: v.boolean(),
+    doNotCall: v.boolean(),
+    costUsd: v.number(),
+    artifactRef: v.optional(v.string()),
+    completedAt: v.number(),
+  })
+    .index("by_provider_call_id", ["providerCallId"])
+    .index("by_batch", ["batchId"]),
+
+  growthReleaseRequests: defineTable({
+    requestId: v.string(),
+    siteId: v.string(),
+    merchantId: v.string(),
+    versionId: v.string(),
+    specHash: v.string(),
+    scopeHash: v.string(),
+    verificationRunId: v.string(),
+    approvalId: v.string(),
+    status: v.union(v.literal("pending"), v.literal("promoted"), v.literal("blocked")),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_request_id", ["requestId"])
+    .index("by_site", ["siteId"]),
+
+  reelPlans: defineTable({
+    reelId: v.string(),
+    merchantId: v.string(),
+    planJson: v.string(),
+    planHash: v.string(),
+    approvalId: v.optional(v.string()),
+    renderedAssetId: v.optional(v.string()),
+    deliveredProviderMessageId: v.optional(v.string()),
+    deliveredAt: v.optional(v.number()),
+    status: v.union(v.literal("draft"), v.literal("approved"), v.literal("rendering"), v.literal("rendered"), v.literal("failed")),
+    createdAt: v.number(),
+  })
+    .index("by_reel_id", ["reelId"])
+    .index("by_merchant", ["merchantId"]),
+
+  socialCampaigns: defineTable({
+    campaignId: v.string(),
+    merchantId: v.string(),
+    campaignJson: v.string(),
+    scopeHash: v.string(),
+    approvalId: v.string(),
+    status: v.union(v.literal("pending_approval"), v.literal("approved"), v.literal("running"), v.literal("complete"), v.literal("failed")),
+    createdAt: v.number(),
+  })
+    .index("by_campaign_id", ["campaignId"])
+    .index("by_merchant", ["merchantId"]),
 });

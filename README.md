@@ -1,159 +1,79 @@
-<div align="center">
+# Axcas — WhatsApp Business Agent
 
-# ⚕ ProofGate
+Axcas turns a small business owner’s WhatsApp voice note, prices, services, and photos into a verified business site with tracked WhatsApp enquiries—without requiring a laptop or dashboard. ProofGate remains the internal verification and release engine name.
 
-### The independent release authority for AI-built buyer journeys.
+The P0 flow is intentionally narrow:
 
-*Your AI-built selling page should have to **prove it works** — before it goes live.*
+1. Hermes `v0.18.2` receives English voice, photos, and text through WhatsApp Business Cloud.
+2. Hermes submits typed intake and immutable assets through the `proofgate` command; it never writes Convex or release state directly.
+3. A constrained renderer produces a mobile product or service site from `SiteSpecV2`. Agents never emit page code.
+4. The verifier checks the candidate. An authenticated merchant button approves the exact candidate hash; deterministic policy alone may promote it.
+5. Product CTAs append a privacy-safe click and redirect to a prefilled message on the merchant’s separate order number.
+6. One exact, consented India/US lead batch may be approved for one-attempt Vapi qualification calls.
+7. Three reel angles can be proposed; one approved plan is rendered from merchant photos with AWS Polly and FFmpeg and returned privately.
+8. Hermes reports raw views/clicks and proposes—not publishes—a verified improvement.
 
-![Track](https://img.shields.io/badge/track-AI%20as%20Agency-bd4c2f)
-![Built on Hermes](https://img.shields.io/badge/built%20on-Hermes%20(Nous)-22251f)
-![Tests](https://img.shields.io/badge/tests-32%20passing-4a9a41)
-![Proof loop](https://img.shields.io/badge/proof%20loop-green-4a9a41)
-![Gate](https://img.shields.io/badge/promotion-deterministic%20policy-4a9a41)
+No dashboard, payments, scraped leads, synthetic product imagery, automatic posting, or autonomous publishing is included.
 
-**[▶ Live demo](https://rides-min-logos-finger.trycloudflare.com)** · **[Build Bible](PROOFGATE_BUILD_BIBLE.md)** · **[Demo runbook](DEMO_RUNBOOK.md)**
+## Run locally
 
-</div>
+```sh
+npm ci
+npm run typecheck
+npm test
+npm run dev:edge
+```
 
----
+Copy `.env.example` to an ignored `.env` and fill only the provider values you own. The Worker remains useful without provider credentials but truthfully reports blocked provider actions.
 
-## The problem
+## Hermes command boundary
 
-Anyone can now generate a website from a prompt. Nobody checks whether a real buyer can actually **finish the purchase** on it. AI-built pages look done and silently break at checkout — wrong quantity, a dead CTA, a confirmation that never arrives. The site ships; the sale doesn't.
+```sh
+npm run proofgate -- intake brief.json
+npm run proofgate -- candidate candidate.json
+npm run proofgate -- verification candidate-scope.json
+npm run proofgate -- release candidate-scope.json
+npm run proofgate -- asset ASSET_ID MERCHANT_ID META_MESSAGE_ID image/jpeg photo.jpg
+npm run proofgate -- lead lead.json
+npm run proofgate -- batch batch.json
+npm run proofgate -- reel reel.json
+npm run proofgate -- deliver-reel REEL_ID ASSET_ID MERCHANT_WA_ID "Your approved reel" --submit
+```
 
-## What ProofGate does
+Commands validate locally by default. Add `--submit` only from the configured Hermes host. `verification` mints a short-lived single-use capability for the isolated verifier; `release` creates—not executes—a merchant approval request. Metrics and approved work are available through `metrics` and `guardian`; the only unauthenticated write is the exact capability-bound verifier evidence route.
 
-ProofGate is a **team of agents that replaces a launch operations function** — and refuses to approve its own work.
+## Important paths
 
-A merchant sends a voice note and photos. An agent crew builds the selling page and compiles the buyer's intention — *"book two seats on mobile and receive a confirmation"* — into an **executable contract**. An **independent verifier** attempts that exact journey. Any failure becomes a **permanent regression test**, a failure-specific **specialist is spawned** to repair the page, and **only deterministic policy code** promotes it to production — after a real booking/payment event witnesses the path. The public **Proof Passport** stays **revocable**: cron replays the contracts and flips it amber/red on regression, then repairs or rolls back.
-
-> The builder cannot approve its own work. The verifier cannot change the page. Only deterministic policy code turns a passport green.
-
-## Why this is not "just prompting"
-
-A prompt to Claude/GPT/v0/Lovable emits a *candidate*. ProofGate owns the *release*:
-
-| A prompt | ProofGate |
+| Path | Responsibility |
 |---|---|
-| Reads and **guesses** it looks right | **Executes** the buyer journey — the interpreter, not the model, says pass/fail |
-| One model, one shot | **Capability-separated** crew: builder ≠ verifier ≠ release authority |
-| No durable state | Versioned specs, contracts, evals, incidents, provenance |
-| Certifies on vibes | **Only deterministic code promotes** — no model call turns a passport green |
-| Forgets the failure | Every failure becomes a **permanent regression test** it can never regress on |
+| `packages/domain/src/growth.ts` | Business, site, consent, approval, outcome, and reel schemas |
+| `packages/renderer/src/render-bakery-site.ts` | Constrained, XSS-safe catalog renderer |
+| `packages/release-policy/src/growth-policy.ts` | Immutable call-batch hash and approval predicate |
+| `packages/whatsapp-io` | Meta signature parsing, buttons, and template adapter |
+| `packages/calls` | Consent-first Vapi squad, outbound client, authenticated callback |
+| `packages/reels` and `apps/reel-worker` | Polly voiceover and verified FFmpeg render |
+| `apps/edge-runtime` | Public routes, webhooks, tracked redirects, private admin boundary |
+| `convex/growth.ts` | Durable events, approvals, consent, guardian claims, structured outcomes |
+| `hermes/skills/proofgate` | Hermes operating policy and typed commands |
+| `infra/` | Credential-gated Cloudflare and AWS foundation |
 
-The defensible unit isn't generated code — it's the **growing set of real buyer failures the business can never ship again.**
+## Public surface
 
-## How it works
+- `GET /s/:slug` — published small-business site
+- `GET /r/whatsapp/:siteId/:itemId` — tracked order redirect
+- `GET /proof/:slug` — Proof Passport
+- `GET /assets/:assetId` — explicitly selected immutable media
+- `GET|POST /whatsapp/webhook` — Meta verification, approval interception, Hermes forwarding
+- `POST /webhooks/vapi` — authenticated structured call outcome
 
-```
-  voice brief ─► Cloudflare CANARY ─► buyer contract compiled
-                                          │
-                                          ▼
-                            independent verifier (no deploy/pay keys)
-                                          │  FAIL
-                        ┌─────────────────┴─────────────────┐
-                        │  failure → permanent eval          │
-                        │  specialist spawned → SiteSpec patch│
-                        │  new immutable version              │
-                        └─────────────────┬─────────────────┘
-                                          │  EXACT replay ─► PASS
-                                          ▼
-                        real external event  (booking / payment)
-                                          │
-                             ┌── deterministic release authority ──┐
-              acknowledged?  │  false → BLOCK · amber              │
-                             │  true  → PROMOTE · green            │
-                             └──────────────────┬─────────────────┘
-                                          ▼
-                              PRODUCTION + green Proof Passport
-                                          ▲
-                     Hermes cron replays contracts ─► regression ─► amber/red ─► repair/rollback
-```
+All administrative mutation routes are bearer-authenticated and intended only for the Hermes command boundary.
 
-## Quick start
+## Deployment truth
 
-```bash
-npm install
+See [Production launch](docs/PRODUCTION_LAUNCH.md) for the no-customer-API-key model,
+server topology, launch sequence, and initial commercial packaging.
 
-npm run demo     # the full proof loop, in-process, deterministic — prints the timeline below
-npm test         # 32 green: 3 legacy + 29 unit (release gate, oracle, verifier separation, repair)
-npm start        # serve the live merchant page + Proof Passport at http://localhost:4173
-```
+Convex development and production are deployed with separate service secrets. The hardened no-card File Storage fallback was verified through the public Worker with one synthetic PNG and an idempotent replay; release separation correctly kept it private. Worker HTTPS, foundation proof, and the WhatsApp GET challenge now respond successfully. This is foundation verification—not merchant acceptance, signed WhatsApp messaging, or Hermes deployment. R2 remains card-blocked and optional; the named Hermes origin and AWS foundation remain pending.
 
-### `npm run demo` — real output, not a mock
-
-```
-[03] (c) verifier runs contract "book 2 seats"   → FAILED (QUANTITY_UNSUPPORTED, page supports 1)
-[04] (d) failure captured as eval + repair specialist spawned (role absent at kickoff)
-[05] (e) specialist patches a Zod-validated SiteSpec → new immutable version (qty_max=2)
-[06] (f) EXACT same contract re-runs             → PASSED
-[07] (g) release gate, identical facts:
-            acknowledged=false → BLOCK  · passport amber (EXTERNAL_ACKNOWLEDGMENT_PENDING)
-            acknowledged=true  → PROMOTE· passport GREEN (EXACT_EXTERNAL_ACKNOWLEDGMENT)
-[08] (h) GREEN — certified version repaired-qty2-v2 · promoted by deterministic policy, not a model
-```
-
-## Architecture
-
-Monorepo — the agency's organs, each capability-scoped:
-
-| Path | Role |
-|---|---|
-| `packages/domain` | SiteSpec (Zod) + immutable, hash-verified site versions |
-| `packages/renderer` | the one constrained, production renderer — agents only touch validated specs |
-| `packages/contract-runner` | compiles buyer intentions into executable contracts |
-| `packages/release-policy` | **release authority** (deterministic promote gate), external oracle, quantity repair |
-| `packages/hermes-io` | Hermes/Telegram boundary |
-| `apps/verifier-runner` | capability-separated verifier (holds **no** deploy/payment/promotion keys) |
-| `apps/edge-runtime` | Cloudflare Worker — canary/production sites + Proof Passport |
-| `apps/spike-b-dispatcher` | external-event witness path |
-| `convex/` | durable state: specs, contracts, runs, events, evals, incidents, passport |
-| `scripts/demo-loop.mjs` | the end-to-end proof loop (`npm run demo`) |
-
-**Capability separation (enforced, not named):** the builder can write specs but not promote; the verifier can run journeys but not write; the release authority can promote but not generate. A mentor asking *"can the builder approve itself?"* is shown the guard, not a promise.
-
-## Stack & partners
-
-**Runtime:** TypeScript · Node · Hono · Zod · Vitest · Playwright
-**Power-ups (AI as Agency):** **Convex** (all product state) · **Cloudflare** (deploys + passport) · **Linkup** (claim verification) · **ElevenLabs** (voice intake + confirmations) · **Wispr Flow** (build)
-**Runs on:** [Hermes](https://github.com/nousresearch/hermes-agent) — gateway intake, subagent delegation, cron guardian, persistent memory.
-
-## Rubric map — AI as Agency
-
-| Parameter | How ProofGate earns it |
-|---|---|
-| **Real output** (20×) | Real merchant page + real external event; launches *and* guardian incidents count as tasks |
-| **Agent org** (5×) | Manager plans per-brief; **specialist spawned from a live failure** |
-| **Observability** (7×) | Per-run trace + cost; red-vs-green diff; regression alert = passport flip |
-| **Evals** (5×) | Every failure auto-becomes a versioned, release-blocking contract |
-| **Memory** (2×) | Now (task) + history (this merchant's failures) + policy (rules) across handoffs |
-
-## Status
-
-| Area | State |
-|---|---|
-| Live merchant page + Proof Passport (touchable) | 🟢 live |
-| End-to-end proof loop (`npm run demo`) | 🟢 deterministic, tested |
-| Capability separation + deterministic gate | 🟢 enforced + covered by tests |
-| Spike A (real Cloudflare Worker render) · Spike B (booking oracle green on consented merchant) | 🟢 passed |
-| Telegram voice intake → live generation · production Cloudflare deploy | 🟡 target |
-| Dodo live payments · ElevenLabs · Linkup | 🟡 pending credentials — **not claimed until wired** |
-
-## Truthfulness
-
-ProofGate never presents a mock, sandbox event, teammate payment, or prerecorded audio as live proof. Failures are preserved, never deleted to inflate a success rate. Real offers map to real deliverables; merchant and buyer consent is logged. Every scoring claim points to an inspectable artifact — see [EVIDENCE.md](EVIDENCE.md).
-
-## Docs
-
-- **[PROOFGATE_BUILD_BIBLE.md](PROOFGATE_BUILD_BIBLE.md)** — full spec & execution brief (30 sections)
-- [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md) — system architecture, pipelines, trust boundaries
-- [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) — judging demo, beat by beat
-- [EVIDENCE.md](EVIDENCE.md) — the claim ledger
-- [docs/privacy-and-consent.md](docs/privacy-and-consent.md) · [docs/provider-evidence.md](docs/provider-evidence.md)
-
----
-
-<div align="center">
-Built for the <b>GrowthX × Nous Research — World's Largest Hermes Buildathon</b> · AI as Agency.
-</div>
+See [architecture](docs/architecture.md), [provider readiness](docs/provider-readiness.md), [privacy and consent](docs/privacy-and-consent.md), and [evidence](EVIDENCE.md).
+The six-step live run and exact evidence requirements are in [live acceptance](docs/LIVE_ACCEPTANCE.md).

@@ -10,6 +10,10 @@
   "scripts": {
     "demo": "tsx scripts/demo-loop.mjs",
     "intake": "tsx scripts/intake.mjs",
+    "proofgate": "tsx apps/proofgate-cli/src/index.ts",
+    "reel:render": "tsx scripts/render-reel.mjs",
+    "acceptance:preflight": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/acceptance-preflight.mjs",
+    "aws:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File infra/aws/deploy.ps1",
     "start": "node src/server.js",
     "dev:edge": "wrangler dev --config apps/edge-runtime/wrangler.jsonc",
     "deploy:spike-a": "wrangler deploy --config apps/edge-runtime/wrangler.jsonc --temporary",
@@ -21,8 +25,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-polly": "^3.1104.0",
     "convex": "^1.42.1",
-    "hono": "^4.10.8",
+    "hono": "^4.13.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {

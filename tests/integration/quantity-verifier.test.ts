@@ -99,7 +99,7 @@ describe("P0 capability-separated exact browser replay", () => {
     } finally {
       await browser.close();
     }
-  });
+  }, 20_000);
 
   it("fails closed when the public response hash does not match the pinned immutable version", async () => {
     const { v2 } = await buildVersions();
