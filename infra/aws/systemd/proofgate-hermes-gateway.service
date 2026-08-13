@@ -1,0 +1,29 @@
+[Unit]
+Description=ProofGate Hermes WhatsApp gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proofgate
+Group=proofgate
+Environment=HOME=/home/proofgate
+WorkingDirectory=/home/proofgate
+EnvironmentFile=/etc/proofgate/hermes.env
+ExecStart=/usr/local/bin/hermes gateway --accept-hooks run
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/home/proofgate
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

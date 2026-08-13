@@ -19,7 +19,28 @@ describe("AWS Hermes runtime assets", () => {
     expect(unit).toContain("EnvironmentFile=/etc/proofgate/origin.env");
     expect(unit).toContain("PROOFGATE_ORIGIN_HOST=127.0.0.1");
     expect(unit).toContain("@proofgate/hermes-origin-proxy");
+    expect(unit).toContain("After=network-online.target proofgate-hermes-gateway.service");
+    expect(unit).toContain("Requires=proofgate-hermes-gateway.service");
     expect(unit).toContain("NoNewPrivileges=true");
+  });
+
+  it("runs the pinned Hermes WhatsApp gateway as the proofgate user", async () => {
+    const unit = await readFile("infra/aws/systemd/proofgate-hermes-gateway.service", "utf8");
+    const script = await readFile("infra/aws/install-runtime.sh", "utf8");
+
+    expect(unit).toContain("User=proofgate");
+    expect(unit).toContain("Group=proofgate");
+    expect(unit).toContain("Environment=HOME=/home/proofgate");
+    expect(unit).toContain("WorkingDirectory=/home/proofgate");
+    expect(unit).toContain("EnvironmentFile=/etc/proofgate/hermes.env");
+    expect(unit).toContain("ExecStart=/usr/local/bin/hermes gateway --accept-hooks run");
+    expect(unit).toContain("Restart=on-failure");
+    expect(unit).toContain("NoNewPrivileges=true");
+    expect(script).toContain(
+      "install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/hermes.env",
+    );
+    expect(script).toContain("proofgate-hermes-gateway.service");
+    expect(script).toContain("systemctl enable proofgate-hermes-gateway.service");
   });
 
   it("keeps AWS ingress closed and exposes deployment outputs", async () => {

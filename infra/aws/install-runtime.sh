@@ -34,9 +34,14 @@ install -d -m 0750 -o root -g proofgate /etc/proofgate
 if [[ ! -e /etc/proofgate/origin.env ]]; then
   install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/origin.env
 fi
+if [[ ! -e /etc/proofgate/hermes.env ]]; then
+  install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/hermes.env
+fi
+install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-gateway.service /etc/systemd/system/proofgate-hermes-gateway.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-origin.service /etc/systemd/system/proofgate-hermes-origin.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared.service /etc/systemd/system/proofgate-cloudflared.service
 systemctl daemon-reload
+systemctl enable proofgate-hermes-gateway.service
 systemctl enable proofgate-hermes-origin.service
 systemctl enable proofgate-cloudflared.service
 

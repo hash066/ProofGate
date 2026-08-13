@@ -1,7 +1,8 @@
 [Unit]
 Description=ProofGate authenticated Hermes origin
-After=network-online.target
+After=network-online.target proofgate-hermes-gateway.service
 Wants=network-online.target
+Requires=proofgate-hermes-gateway.service
 
 [Service]
 Type=simple
