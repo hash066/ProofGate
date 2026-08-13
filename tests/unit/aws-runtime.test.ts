@@ -9,6 +9,10 @@ describe("AWS Hermes runtime assets", () => {
     expect(script).toMatch(/git .* checkout --detach/);
     expect(script).toMatch(/npm .* ci --ignore-scripts/);
     expect(script).toContain("hermes/skills/proofgate");
+    expect(script).toContain('venv/bin/pip install -e ".[messaging]"');
+    expect(script).toContain(
+      "install -d -m 0750 -o proofgate -g proofgate /home/proofgate/.hermes /home/proofgate/.hermes/logs",
+    );
     expect(script).not.toMatch(/customer.*(?:api.?key|access.?token)/i);
     expect(script).not.toContain("git checkout main");
   });
@@ -52,6 +56,7 @@ describe("AWS Hermes runtime assets", () => {
     expect(template).toContain("InstanceId:");
     expect(template).toContain("RecordingsBucketName:");
     expect(template).toContain("AWSRegion:");
+    expect(template).toContain('venv/bin/pip install -e ".[messaging]"');
     expect(template).toContain("cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64");
     expect(template).toContain("9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17");
   });

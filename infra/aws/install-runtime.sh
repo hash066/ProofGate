@@ -27,6 +27,13 @@ sudo -u proofgate git -C /opt/proofgate/ProofGate checkout --detach "${REPOSITOR
 test "$(sudo -u proofgate git -C /opt/proofgate/ProofGate rev-parse HEAD)" = "${REPOSITORY_COMMIT}"
 sudo -u proofgate npm --prefix /opt/proofgate/ProofGate ci --ignore-scripts
 
+test -x /opt/proofgate/hermes-agent/venv/bin/pip
+(
+  cd /opt/proofgate/hermes-agent
+  sudo -u proofgate venv/bin/pip install -e ".[messaging]"
+)
+
+install -d -m 0750 -o proofgate -g proofgate /home/proofgate/.hermes /home/proofgate/.hermes/logs
 install -d -o proofgate -g proofgate /home/proofgate/.hermes/skills
 ln -sfn /opt/proofgate/ProofGate/hermes/skills/proofgate /home/proofgate/.hermes/skills/proofgate
 
