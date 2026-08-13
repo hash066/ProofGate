@@ -25,6 +25,7 @@ describe("AWS Hermes runtime assets", () => {
   it("keeps AWS ingress closed and exposes deployment outputs", async () => {
     const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
     expect(template).not.toContain("SecurityGroupIngress");
+    expect(template).not.toContain("SecurityGroupEgress");
     expect(template).toContain("IamInstanceProfile: !Ref HermesProfile");
     expect(template).not.toContain("IamInstanceProfile: { Name: !Ref HermesProfile }");
     expect(template).toContain("InstanceId:");

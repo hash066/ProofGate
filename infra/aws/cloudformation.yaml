@@ -52,9 +52,6 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Outbound-only ProofGate Hermes host; Cloudflare Tunnel creates the ingress path
-      SecurityGroupEgress:
-        - IpProtocol: '-1'
-          CidrIp: 0.0.0.0/0
   HermesHost:
     Type: AWS::EC2::Instance
     Properties:
