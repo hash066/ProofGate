@@ -50,6 +50,7 @@ describe("AWS Hermes runtime assets", () => {
     expect(deploy).toContain("aws ssm send-command");
     expect(deploy).toContain("aws ssm wait command-executed");
     expect(deploy).toContain("raw.githubusercontent.com");
+    expect(deploy).not.toContain('"set -euo pipefail"');
     expect(deploy).not.toMatch(/customer.*(?:api.?key|access.?token)/i);
   });
 });

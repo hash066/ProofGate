@@ -54,7 +54,7 @@ if (-not $registered) { throw "Instance did not register with Systems Manager." 
 $repositoryPath = ($RepositoryUrl -replace '^https://github.com/', '') -replace '\.git$', ''
 $installerUrl = "https://raw.githubusercontent.com/$repositoryPath/$RepositoryCommit/infra/aws/install-runtime.sh"
 $commands = @(
-  "set -euo pipefail",
+  "set -eu",
   "curl -fsSL '$installerUrl' -o /tmp/proofgate-install-runtime.sh",
   "chmod 0700 /tmp/proofgate-install-runtime.sh",
   "sudo /tmp/proofgate-install-runtime.sh '$RepositoryUrl' '$RepositoryCommit'"
