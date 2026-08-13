@@ -47,6 +47,7 @@ fi
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-gateway.service /etc/systemd/system/proofgate-hermes-gateway.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-origin.service /etc/systemd/system/proofgate-hermes-origin.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared.service /etc/systemd/system/proofgate-cloudflared.service
+install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared-quick.service /etc/systemd/system/proofgate-cloudflared-quick.service
 systemctl daemon-reload
 systemctl enable proofgate-hermes-gateway.service
 systemctl enable proofgate-hermes-origin.service

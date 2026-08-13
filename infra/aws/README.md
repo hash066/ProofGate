@@ -73,3 +73,7 @@ sudo -u proofgate -H hermes gateway status
 ```
 
 Use a quick tunnel only for foundation testing. Before an external merchant is enrolled, configure a named Cloudflare Tunnel/custom origin and set `HERMES_ORIGIN_URL` on the Worker.
+
+The installer includes `proofgate-cloudflared-quick.service` but deliberately does not
+enable it. Start it manually only for foundation tests; its random `trycloudflare.com`
+URL is temporary and must be replaced by the named tunnel before merchant onboarding.

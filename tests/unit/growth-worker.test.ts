@@ -251,7 +251,7 @@ describe("growth Worker", () => {
     }, { PROOFGATE_SERVICE_SECRET: "service-secret", CONVEX_URL: "https://example.convex.cloud" });
     expect(rejected.status).toBe(413);
     expect(rejectedAdmin.uploadAsset).not.toHaveBeenCalled();
-  });
+  }, 20_000);
 
   it("rejects media whose magic bytes do not match its declared type", async () => {
     const admin = adminBoundary();

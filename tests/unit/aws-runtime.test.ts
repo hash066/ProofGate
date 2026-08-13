@@ -68,6 +68,21 @@ describe("AWS Hermes runtime assets", () => {
     expect(unit).not.toMatch(/eyJ[A-Za-z0-9._-]{80,}/);
   });
 
+  it("installs but does not enable the foundation-only quick tunnel", async () => {
+    const unit = await readFile("infra/aws/systemd/proofgate-cloudflared-quick.service", "utf8");
+    const script = await readFile("infra/aws/install-runtime.sh", "utf8");
+
+    expect(unit).toContain("After=network-online.target proofgate-hermes-origin.service");
+    expect(unit).toContain("Requires=proofgate-hermes-origin.service");
+    expect(unit).toContain(
+      "ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080",
+    );
+    expect(unit).toContain("Restart=on-failure");
+    expect(unit).toContain("NoNewPrivileges=true");
+    expect(script).toContain("proofgate-cloudflared-quick.service");
+    expect(script).not.toContain("systemctl enable proofgate-cloudflared-quick.service");
+  });
+
   it("provides a fail-closed one-command AWS deployment", async () => {
     const deploy = await readFile("infra/aws/deploy.ps1", "utf8");
     expect(deploy).toContain("aws sts get-caller-identity");

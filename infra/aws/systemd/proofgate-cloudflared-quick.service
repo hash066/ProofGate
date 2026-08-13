@@ -1,0 +1,27 @@
+[Unit]
+Description=ProofGate foundation-only Cloudflare Quick Tunnel
+After=network-online.target proofgate-hermes-origin.service
+Wants=network-online.target
+Requires=proofgate-hermes-origin.service
+
+[Service]
+Type=simple
+User=proofgate
+Group=proofgate
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
