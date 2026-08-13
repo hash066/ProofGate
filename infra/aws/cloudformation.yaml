@@ -76,7 +76,16 @@ Resources:
           #!/bin/bash
           set -euo pipefail
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl ffmpeg git python3-venv python3-pip nodejs npm
+          DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl ffmpeg git python3-venv python3-pip xz-utils
+          curl -fsSL https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz -o /tmp/node-v22.23.2-linux-x64.tar.xz
+          echo 'd60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307  /tmp/node-v22.23.2-linux-x64.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/node-v22.23.2-linux-x64.tar.xz -C /opt
+          ln -s /opt/node-v22.23.2-linux-x64/bin/node /usr/local/bin/node
+          ln -s /opt/node-v22.23.2-linux-x64/bin/npm /usr/local/bin/npm
+          ln -s /opt/node-v22.23.2-linux-x64/bin/npx /usr/local/bin/npx
+          ln -s /opt/node-v22.23.2-linux-x64/bin/corepack /usr/local/bin/corepack
+          test "$(node --version)" = "v22.23.2"
+          test "$(npm --version)" = "10.9.8"
           curl -fsSL https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
           echo '9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17  /usr/local/bin/cloudflared' | sha256sum -c -
           chmod 0755 /usr/local/bin/cloudflared

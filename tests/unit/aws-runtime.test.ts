@@ -59,6 +59,14 @@ describe("AWS Hermes runtime assets", () => {
     expect(template).toContain('venv/bin/pip install -e ".[messaging]"');
     expect(template).toContain("cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64");
     expect(template).toContain("9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17");
+    expect(template).toContain("https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz");
+    expect(template).toContain("d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307");
+    expect(template).toContain("ln -s /opt/node-v22.23.2-linux-x64/bin/node /usr/local/bin/node");
+    expect(template).toContain("ln -s /opt/node-v22.23.2-linux-x64/bin/npm /usr/local/bin/npm");
+    expect(template).toContain('test "$(node --version)" = "v22.23.2"');
+    expect(template).toContain('test "$(npm --version)" = "10.9.8"');
+    expect(template).not.toMatch(/apt-get install[^\n]*(?:nodejs|npm)/);
+    expect(template).not.toMatch(/nodesource/i);
   });
 
   it("runs the named tunnel from a root-readable token file", async () => {
