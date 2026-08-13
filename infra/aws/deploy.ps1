@@ -39,7 +39,10 @@ if ($LASTEXITCODE -ne 0) { throw "CloudFormation deployment failed." }
 
 $instanceId = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text
 $bucket = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RecordingsBucketName'].OutputValue" --output text
-if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket)) {
+$relayOrigin = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayOriginUrl'].OutputValue" --output text
+$relayQueue = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayQueueUrl'].OutputValue" --output text
+$relaySecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelaySecretArn'].OutputValue" --output text
+if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:') {
   throw "Stack outputs are incomplete."
 }
 
@@ -57,7 +60,11 @@ $commands = @(
   "set -eu",
   "curl -fsSL '$installerUrl' -o /tmp/proofgate-install-runtime.sh",
   "chmod 0700 /tmp/proofgate-install-runtime.sh",
-  "sudo /tmp/proofgate-install-runtime.sh '$RepositoryUrl' '$RepositoryCommit'"
+  "sudo /tmp/proofgate-install-runtime.sh '$RepositoryUrl' '$RepositoryCommit'",
+  "printf '%s\n' 'HERMES_RELAY_QUEUE_URL=$relayQueue' | sudo tee /etc/proofgate/relay.env >/dev/null",
+  "sudo chown root:proofgate /etc/proofgate/relay.env && sudo chmod 0640 /etc/proofgate/relay.env",
+  "if sudo grep -q '^HERMES_PROXY_SECRET=.' /etc/proofgate/origin.env; then sudo HERMES_RELAY_SECRET_ARN='$relaySecretArn' node /opt/proofgate/ProofGate/infra/aws/sync-relay-secret.mjs; fi",
+  "sudo systemctl restart proofgate-hermes-relay.service"
 )
 $parameters = @{ commands = $commands } | ConvertTo-Json -Compress
 $commandId = aws ssm send-command --region $Region --instance-ids $instanceId --document-name AWS-RunShellScript --parameters $parameters --query "Command.CommandId" --output text
@@ -73,6 +80,8 @@ if ($LASTEXITCODE -ne 0 -or $status -ne "Success") { throw "Runtime installation
   Region = $Region
   InstanceId = $instanceId
   RecordingsBucket = $bucket
+  RelayOriginUrl = $relayOrigin
+  RelayQueueUrl = $relayQueue
   RepositoryCommit = $RepositoryCommit
   RuntimeInstalled = $true
 }

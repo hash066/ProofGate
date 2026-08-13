@@ -5,6 +5,153 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
 Resources:
+  HermesRelayDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      SqsManagedSseEnabled: true
+  HermesRelayQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600
+      ReceiveMessageWaitTimeSeconds: 20
+      SqsManagedSseEnabled: true
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt HermesRelayDeadLetterQueue.Arn
+        maxReceiveCount: 5
+  HermesRelayProxySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Worker-to-AWS Hermes relay authentication secret
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+  HermesRelayFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: ProofGateRelayIngress
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [sqs:SendMessage]
+                Resource: !GetAtt HermesRelayQueue.Arn
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref HermesRelayProxySecret
+  HermesRelayFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Authenticated durable WhatsApp ingress for Hermes
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt HermesRelayFunctionRole.Arn
+      Runtime: python3.12
+      Timeout: 10
+      Environment:
+        Variables:
+          RELAY_QUEUE_URL: !Ref HermesRelayQueue
+          RELAY_SECRET_ARN: !Ref HermesRelayProxySecret
+      Code:
+        ZipFile: |
+          import base64
+          import boto3
+          import hmac
+          import json
+          import os
+          import re
+
+          queue = boto3.client("sqs")
+          secrets = boto3.client("secretsmanager")
+          cached_secret = None
+
+          def reply(status, body):
+              return {"statusCode": status, "headers": {"content-type": "application/json", "cache-control": "no-store"}, "body": json.dumps(body)}
+
+          def proxy_secret(refresh=False):
+              global cached_secret
+              if refresh or cached_secret is None:
+                  cached_secret = secrets.get_secret_value(SecretId=os.environ["RELAY_SECRET_ARN"])["SecretString"]
+              return cached_secret
+
+          def handler(event, context):
+              method = event.get("requestContext", {}).get("http", {}).get("method", "")
+              path = event.get("rawPath", "")
+              if method == "GET" and path == "/health":
+                  return reply(200, {"service": "proofgate-hermes-relay", "status": "ok"})
+              if method != "POST" or path != "/whatsapp/webhook":
+                  return reply(404, {"error": "not_found"})
+              headers = {str(key).lower(): str(value) for key, value in (event.get("headers") or {}).items()}
+              provided = headers.get("x-proofgate-proxy", "")
+              if not hmac.compare_digest(provided, proxy_secret()):
+                  if not hmac.compare_digest(provided, proxy_secret(True)):
+                      return reply(401, {"error": "unauthorized"})
+              try:
+                  incoming = event.get("body") or ""
+                  raw = base64.b64decode(incoming, validate=True) if event.get("isBase64Encoded") else incoming.encode("utf-8")
+              except Exception:
+                  return reply(400, {"error": "invalid_body"})
+              if not raw or len(raw) > 2097152:
+                  return reply(413, {"error": "invalid_size"})
+              signature = headers.get("x-hub-signature-256", "")
+              if not re.fullmatch(r"sha256=[a-f0-9]{64}", signature):
+                  return reply(400, {"error": "invalid_meta_signature"})
+              envelope = {
+                  "schemaVersion": 1,
+                  "bodyBase64": base64.b64encode(raw).decode("ascii"),
+                  "contentType": headers.get("content-type", "application/json"),
+                  "metaSignature": signature,
+              }
+              result = queue.send_message(QueueUrl=os.environ["RELAY_QUEUE_URL"], MessageBody=json.dumps(envelope, separators=(",", ":")))
+              return reply(202, {"accepted": True, "requestId": context.aws_request_id, "messageId": result["MessageId"]})
+  HermesRelayApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Description: Stable HTTPS ingress for the ProofGate Hermes relay
+      Name: proofgate-hermes-relay
+      ProtocolType: HTTP
+  HermesRelayIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt HermesRelayFunction.Arn
+      PayloadFormatVersion: '2.0'
+  HermesRelayHealthRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      RouteKey: GET /health
+      Target: !Join ['/', [integrations, !Ref HermesRelayIntegration]]
+  HermesRelayWebhookRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      RouteKey: POST /whatsapp/webhook
+      Target: !Join ['/', [integrations, !Ref HermesRelayIntegration]]
+  HermesRelayStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      AutoDeploy: true
+      StageName: $default
+  HermesRelayInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HermesRelayFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HermesRelayApi}/*/*'
   RecordingsBucket:
     Type: AWS::S3::Bucket
     Properties:
@@ -45,6 +192,12 @@ Resources:
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
                 Resource: !Sub '${RecordingsBucket.Arn}/*'
+              - Effect: Allow
+                Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility, sqs:GetQueueAttributes]
+                Resource: !GetAtt HermesRelayQueue.Arn
+              - Effect: Allow
+                Action: [secretsmanager:PutSecretValue]
+                Resource: !Ref HermesRelayProxySecret
   HermesProfile:
     Type: AWS::IAM::InstanceProfile
     Properties: { Roles: [!Ref HermesRole] }
@@ -106,4 +259,7 @@ Resources:
 Outputs:
   InstanceId: { Value: !Ref HermesHost }
   RecordingsBucketName: { Value: !Ref RecordingsBucket }
+  RelayOriginUrl: { Value: !Sub 'https://${HermesRelayApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}' }
+  RelayQueueUrl: { Value: !Ref HermesRelayQueue }
+  RelaySecretArn: { Value: !Ref HermesRelayProxySecret }
   AWSRegion: { Value: !Ref 'AWS::Region' }

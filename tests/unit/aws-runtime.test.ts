@@ -67,6 +67,25 @@ describe("AWS Hermes runtime assets", () => {
     expect(template).toContain('test "$(npm --version)" = "10.9.8"');
     expect(template).not.toMatch(/apt-get install[^\n]*(?:nodejs|npm)/);
     expect(template).not.toMatch(/nodesource/i);
+    expect(template).toContain("HermesRelayQueue:");
+    expect(template).toContain("HermesRelayDeadLetterQueue:");
+    expect(template).toContain("HermesRelayApi:");
+    expect(template).toContain("HermesRelayFunction:");
+    expect(template).toContain("SqsManagedSseEnabled: true");
+    expect(template).toContain("RelayOriginUrl:");
+    expect(template).toContain("RelayQueueUrl:");
+  });
+
+  it("installs the durable SQS relay as a restricted service", async () => {
+    const unit = await readFile("infra/aws/systemd/proofgate-hermes-relay.service", "utf8");
+    const script = await readFile("infra/aws/install-runtime.sh", "utf8");
+
+    expect(unit).toContain("User=proofgate");
+    expect(unit).toContain("EnvironmentFile=/etc/proofgate/relay.env");
+    expect(unit).toContain("@proofgate/hermes-sqs-relay");
+    expect(unit).toContain("NoNewPrivileges=true");
+    expect(script).toContain("proofgate-hermes-relay.service");
+    expect(script).toContain("systemctl enable proofgate-hermes-relay.service");
   });
 
   it("runs the named tunnel from a root-readable token file", async () => {

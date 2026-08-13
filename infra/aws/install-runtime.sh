@@ -44,13 +44,18 @@ fi
 if [[ ! -e /etc/proofgate/hermes.env ]]; then
   install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/hermes.env
 fi
+if [[ ! -e /etc/proofgate/relay.env ]]; then
+  install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/relay.env
+fi
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-gateway.service /etc/systemd/system/proofgate-hermes-gateway.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-origin.service /etc/systemd/system/proofgate-hermes-origin.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared.service /etc/systemd/system/proofgate-cloudflared.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared-quick.service /etc/systemd/system/proofgate-cloudflared-quick.service
+install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-relay.service /etc/systemd/system/proofgate-hermes-relay.service
 systemctl daemon-reload
 systemctl enable proofgate-hermes-gateway.service
 systemctl enable proofgate-hermes-origin.service
 systemctl enable proofgate-cloudflared.service
+systemctl enable proofgate-hermes-relay.service
 
 echo "Runtime installed. Add the operator secrets, configure Hermes and the named-tunnel route, then start services."

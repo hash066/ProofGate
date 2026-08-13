@@ -1,0 +1,24 @@
+[Unit]
+Description=ProofGate durable SQS to Hermes relay
+After=network-online.target proofgate-hermes-gateway.service
+Wants=network-online.target
+Requires=proofgate-hermes-gateway.service
+
+[Service]
+Type=simple
+User=proofgate
+Group=proofgate
+WorkingDirectory=/opt/proofgate/ProofGate
+Environment=NODE_ENV=production
+Environment=HERMES_UPSTREAM_URL=http://127.0.0.1:8090/whatsapp/webhook
+EnvironmentFile=/etc/proofgate/relay.env
+ExecStart=/usr/bin/npm run start --workspace @proofgate/hermes-sqs-relay
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
