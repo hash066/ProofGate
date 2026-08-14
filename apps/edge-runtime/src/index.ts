@@ -67,6 +67,7 @@ export type GrowthBoundary = {
 export type GrowthAdminBoundary = {
   upsertMerchant: (brief: BusinessBriefV1, encryptedOrderNumber: string, bindings?: Bindings) => Promise<unknown>;
   createCandidate: (input: { spec: SiteSpecV2; versionId: string; parentVersionId?: string; specHash: string; actor: string }, bindings?: Bindings) => Promise<unknown>;
+  getPreviewSite: (siteId: string, versionId: string, specHash: string, bindings?: Bindings) => Promise<{ spec: SiteSpecV2; versionId: string; specHash: string } | null>;
   registerLead: (merchantId: string, consent: LeadConsentV1, bindings?: Bindings) => Promise<unknown>;
   createApproval: (input: { approvalId: string; merchantId: string; type: "release" | "call_batch" | "reel" | "social_campaign"; scopeHash: string; expiresAt: number }, bindings?: Bindings) => Promise<unknown>;
   attachApprovalMessage: (approvalId: string, providerMessageId: string, bindings?: Bindings) => Promise<unknown>;
@@ -225,6 +226,12 @@ function serviceSecret(bindings?: Bindings): string {
 const liveAdminBoundary: GrowthAdminBoundary = {
   upsertMerchant: (brief, encryptedOrderNumber, bindings) => adminClient(bindings).action((api as any).growth.adminUpsertMerchant, { serviceSecret: serviceSecret(bindings), merchantId: brief.merchantId, ownerWaIdHash: brief.ownerWaIdHash, name: brief.businessName, timezone: brief.timezone, orderWhatsAppNumberCiphertext: encryptedOrderNumber, createdAt: Date.now() }),
   createCandidate: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateCandidate, { serviceSecret: serviceSecret(bindings), merchantId: input.spec.business.merchantId, slug: input.spec.siteId, versionId: input.versionId, parentVersionId: input.parentVersionId, specJson: JSON.stringify(input.spec), specHash: input.specHash, actor: input.actor, createdAt: Date.now() }),
+  getPreviewSite: async (siteId, versionId, specHash, bindings) => {
+    const result = await adminClient(bindings).query((api as any).growth.adminGetPreviewSite, {
+      serviceSecret: serviceSecret(bindings), siteId, versionId, specHash,
+    }) as null | { specJson: string; versionId: string; specHash: string };
+    return result ? { ...result, spec: SiteSpecV2Schema.parse(JSON.parse(result.specJson)) } : null;
+  },
   registerLead: (merchantId, consent, bindings) => adminClient(bindings).action((api as any).growth.adminRegisterLead, { serviceSecret: serviceSecret(bindings), merchantId, leadId: consent.leadId, phoneCiphertext: consent.phoneCiphertext, phoneHash: consent.phoneHash, country: consent.country, purpose: consent.purpose, source: consent.source, evidenceHash: consent.evidenceHash, grantedAt: consent.grantedAt, revokedAt: consent.revokedAt, localTimezone: consent.localTimezone, callWindowStartHour: consent.callWindow.startHour, callWindowEndHour: consent.callWindow.endHour, createdAt: Date.now() }),
   createApproval: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateApproval, { serviceSecret: serviceSecret(bindings), ...input, providerMessageId: "pending", createdAt: Date.now() }),
   attachApprovalMessage: (approvalId, providerMessageId, bindings) => adminClient(bindings).action((api as any).growth.adminAttachApprovalMessage, { serviceSecret: serviceSecret(bindings), approvalId, providerMessageId }),
@@ -304,6 +311,50 @@ function adminAuthorized(authorization: string | undefined, bindings?: Bindings)
   return different === 0;
 }
 
+type PreviewClaims = { siteId: string; versionId: string; specHash: string; expiresAt: number };
+
+function base64UrlEncode(value: Uint8Array): string {
+  let binary = "";
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlDecode(value: string): Uint8Array {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+}
+
+async function previewSignature(payload: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return base64UrlEncode(new Uint8Array(signature));
+}
+
+async function createPreviewToken(claims: PreviewClaims, secret: string): Promise<string> {
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify(claims)));
+  return `pgp_${payload}.${await previewSignature(payload, secret)}`;
+}
+
+async function verifyPreviewToken(token: string, secret: string): Promise<PreviewClaims | null> {
+  const match = /^pgp_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(token);
+  if (!match) return null;
+  const expected = await previewSignature(match[1]!, secret);
+  const actual = match[2]!;
+  if (actual.length !== expected.length) return null;
+  let different = 0;
+  for (let index = 0; index < expected.length; index += 1) different |= expected.charCodeAt(index) ^ actual.charCodeAt(index);
+  if (different !== 0) return null;
+  try {
+    const claims = JSON.parse(new TextDecoder().decode(base64UrlDecode(match[1]!))) as PreviewClaims;
+    if (!claims || typeof claims.siteId !== "string" || typeof claims.versionId !== "string" || !/^[a-f0-9]{64}$/.test(claims.specHash) || !Number.isFinite(claims.expiresAt) || claims.expiresAt < Date.now()) return null;
+    return claims;
+  } catch { return null; }
+}
+
+function selectedPreviewAssetIds(spec: SiteSpecV2): Set<string> {
+  return new Set([spec.hero.imageAssetId, spec.seo.socialImageAssetId, ...spec.catalog.map((item) => item.imageAssetId)]);
+}
+
 async function tenantFromHermesHeader(value: string | undefined) {
   if (!value) return null;
   try { return await deriveTenantIdentity(value); } catch { return null; }
@@ -361,6 +412,36 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
   app.get("/data-deletion", (context) => context.html(renderDataDeletion(), 200, legalHeaders));
   app.get("/terms", (context) => context.html(renderTermsOfService(), 200, legalHeaders));
   app.get("/health", (context) => context.json({ service: "proofgate-edge", phase: "whatsapp-growth-p0", status: "ok" }));
+  app.get("/preview/:token/assets/:assetId", async (context) => {
+    const secret = context.env?.PROOFGATE_SERVICE_SECRET;
+    if (!secret) return context.text("Preview service unavailable", 503);
+    const claims = await verifyPreviewToken(context.req.param("token"), secret);
+    if (!claims) return context.text("Preview link is invalid or expired", 403);
+    const site = await adminBoundary.getPreviewSite(claims.siteId, claims.versionId, claims.specHash, context.env);
+    const assetId = context.req.param("assetId");
+    if (!site || !selectedPreviewAssetIds(site.spec).has(assetId)) return context.notFound();
+    const asset = await adminBoundary.getPrivateAsset(assetId, context.env);
+    if (!asset) return context.notFound();
+    return new Response(asset.body as BodyInit, { headers: {
+      "content-type": asset.contentType, etag: asset.etag, "cache-control": "private, no-store",
+      "x-content-type-options": "nosniff", "x-robots-tag": "noindex, nofollow",
+    } });
+  });
+  app.get("/preview/:token", async (context) => {
+    const secret = context.env?.PROOFGATE_SERVICE_SECRET;
+    if (!secret) return context.text("Preview service unavailable", 503);
+    const token = context.req.param("token");
+    const claims = await verifyPreviewToken(token, secret);
+    if (!claims) return context.text("Preview link is invalid or expired", 403);
+    const site = await adminBoundary.getPreviewSite(claims.siteId, claims.versionId, claims.specHash, context.env);
+    if (!site) return context.text("Preview is no longer current", 410);
+    return context.html(renderBusinessSite(site.spec, site, { assetBasePath: `/preview/${token}/assets`, preview: true }), 200, {
+      "cache-control": "private, no-store",
+      "content-security-policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer", "x-content-type-options": "nosniff", "x-robots-tag": "noindex, nofollow",
+      "x-proofgate-spec-hash": site.specHash, "x-proofgate-version-id": site.versionId,
+    });
+  });
   app.get("/s/:slug", async (context) => {
     const slug = context.req.param("slug");
     const growthSite = await growthBoundary.getPublishedSite(slug, context.env);
@@ -505,7 +586,10 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!payload.versionId || !/^[a-zA-Z0-9_-]{3,128}$/.test(payload.versionId)) return context.text("Invalid version ID", 400);
     const specHash = await sha256(canonicalize(spec));
     const result = await adminBoundary.createCandidate({ spec, versionId: payload.versionId, parentVersionId: payload.parentVersionId, specHash, actor: `hermes:${tenant.ownerWaIdHash}` }, context.env);
-    return context.json({ accepted: true, specHash, result }, 201);
+    const previewExpiresAt = Date.now() + 24 * 60 * 60_000;
+    const previewToken = await createPreviewToken({ siteId: spec.siteId, versionId: payload.versionId, specHash, expiresAt: previewExpiresAt }, serviceSecret(context.env));
+    const previewUrl = `${new URL(context.req.url).origin}/preview/${previewToken}`;
+    return context.json({ accepted: true, specHash, previewUrl, previewExpiresAt, result }, 201);
   });
   app.post("/internal/verification-capability", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);

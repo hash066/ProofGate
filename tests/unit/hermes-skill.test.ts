@@ -12,4 +12,12 @@ describe("Axcas Hermes merchant experience", () => {
     expect(skill).toContain("Never show environment-variable names");
     expect(skill).not.toContain("HERMES_SESSION_* correlation fields");
   });
+
+  it("sends a real preview link and asks once for site publication", async () => {
+    const skill = await readFile("hermes/skills/proofgate/SKILL.md", "utf8");
+    expect(skill).toContain("exactly one approval prompt");
+    expect(skill).toContain("previewUrl");
+    expect(skill).toContain("Never send raw HTML");
+    expect(skill).toContain("merchant supplies none of them");
+  });
 });

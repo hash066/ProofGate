@@ -23,6 +23,9 @@ function adminBoundary(): GrowthAdminBoundary {
   return {
     upsertMerchant: vi.fn(async () => ({ inserted: true })),
     createCandidate: vi.fn(async () => ({ inserted: true })),
+    getPreviewSite: vi.fn(async (siteId: string, versionId: string, specHash: string) => siteId === "mayas-oven" && versionId === "bakery-v1"
+      ? { spec: initialBakerySiteSpec, versionId, specHash }
+      : null),
     registerLead: vi.fn(async () => ({ inserted: true })),
     createApproval: vi.fn(async () => ({ inserted: true })),
     attachApprovalMessage: vi.fn(async () => ({ attached: true })),
@@ -32,7 +35,9 @@ function adminBoundary(): GrowthAdminBoundary {
     uploadAsset: vi.fn(async () => ({ inserted: true, storageBackend: "convex" as const })),
     getPrivateAsset: vi.fn(async (assetId: string) => assetId === "reel-output-1"
       ? { body: new Uint8Array([1, 2, 3]), contentType: "video/mp4", etag: "convex-etag" }
-      : null),
+      : assetId === "cake-1"
+        ? { body: new Uint8Array([0xff, 0xd8, 0xff]), contentType: "image/jpeg", etag: "preview-etag" }
+        : null),
     metrics: vi.fn(async () => ({ views: 10, clicks: 2, clickThroughRate: 0.2 })),
     claimCallBatch: vi.fn(async () => null),
     claimReel: vi.fn(async () => null),
@@ -152,6 +157,51 @@ describe("growth Worker", () => {
     expect(await response.text()).toContain('data-pg="catalog"');
     expect(growth.events[0]).toMatchObject({ type: "page_view", siteId: "mayas-oven", versionId: "bakery-v1" });
     expect(growth.events[0]).not.toHaveProperty("ip");
+  });
+
+  it("returns one expiring visible preview URL with a candidate", async () => {
+    const admin = adminBoundary();
+    const owner = "919876543210";
+    const tenant = await deriveTenantIdentity(owner);
+    const spec = { ...initialBakerySiteSpec, business: { ...initialBakerySiteSpec.business, merchantId: tenant.merchantId } };
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/candidate", {
+      method: "POST",
+      headers: { authorization: "Bearer service-secret", "content-type": "application/json", "x-hermes-user-id": owner },
+      body: JSON.stringify({ versionId: "bakery-v1", spec }),
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(response.status).toBe(201);
+    const result = await response.json() as { previewUrl: string; previewExpiresAt: number };
+    expect(result.previewUrl).toMatch(/^http:\/\/proofgate\.test\/preview\/pgp_[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+    expect(result.previewExpiresAt).toBeGreaterThan(Date.now());
+
+    const preview = await createApp(undefined, boundary(), admin).request(result.previewUrl, {}, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("cache-control")).toBe("private, no-store");
+    expect(preview.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    const html = await preview.text();
+    expect(html).toContain('data-pg="catalog"');
+    expect(html).toContain(`${new URL(result.previewUrl).pathname}/assets/cake-1`);
+  });
+
+  it("rejects tampered preview links and hides assets outside the candidate", async () => {
+    const admin = adminBoundary();
+    const owner = "919876543210";
+    const tenant = await deriveTenantIdentity(owner);
+    const spec = { ...initialBakerySiteSpec, business: { ...initialBakerySiteSpec.business, merchantId: tenant.merchantId } };
+    const candidate = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/candidate", {
+      method: "POST",
+      headers: { authorization: "Bearer service-secret", "content-type": "application/json", "x-hermes-user-id": owner },
+      body: JSON.stringify({ versionId: "bakery-v1", spec }),
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    const { previewUrl } = await candidate.json() as { previewUrl: string };
+    const token = new URL(previewUrl).pathname.split("/").pop()!;
+    const app = createApp(undefined, boundary(), admin);
+    const tampered = await app.request(`http://proofgate.test/preview/${token.slice(0, -1)}x`, {}, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(tampered.status).toBe(403);
+    const selected = await app.request(`${previewUrl}/assets/cake-1`, {}, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(selected.status).toBe(200);
+    const hidden = await app.request(`${previewUrl}/assets/other-merchant-photo`, {}, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(hidden.status).toBe(404);
   });
 
   it("records a CTA click before redirecting to a prefilled WhatsApp order", async () => {

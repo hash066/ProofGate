@@ -29,6 +29,8 @@ The onboarding UX is one natural bundle and at most one consolidated follow-up:
 3. If a fact required to publish is still missing, ask one short message listing all missing required facts together. Never ask a sequence of one-field questions.
 4. Continue reversible work automatically under the active decision policy and return one checked preview. The merchant's first mandatory decision is the exact publish approval.
 
+The initial site journey has exactly one approval prompt: **publish this checked preview**. Do not request approval for transcription, inference, private photo storage, copy drafting, candidate creation, or verification. Do not start calls, reel rendering, or social publishing during site onboarding unless the merchant separately asks for that feature. Those later high-impact actions keep their own single scoped approval.
+
 Do not offer generic assistance or ask what the merchant wants to do after they have described a business.
 
 ## Required boundary
@@ -71,12 +73,15 @@ A `require_approval` result creates exactly one scoped approval at the point of 
 3. Transcribe the English voice note automatically when policy allows. Ask at most one consolidated follow-up for required facts that cannot be safely inferred; never invent claims, qualifications, certifications, prices, or availability.
 4. Upload each eligible real photo as a private immutable asset. The Worker returns a tenant-scoped asset ID; use that returned ID in the catalog and `SiteSpecV2`. Never use the local filename as if it were the canonical ID.
 5. Submit `BusinessBriefV1`, then a business-type-aware `SiteSpecV2` candidate. Agents produce data, never HTML, JavaScript, or CSS.
+6. The candidate response includes an expiring `previewUrl`. Send that clickable URL to the merchant with one short summary. Never send raw HTML, a local file path, JSON, storage details, or an infrastructure explanation as the preview. Axcas owns the Worker, Convex storage, AWS runtime, and provider credentials; the merchant supplies none of them.
 
 ## Approval and release
 
 All approval buttons have `pg:<approvalId>:approve|deny`. The Cloudflare Worker verifies the Meta signature, hashes the authenticated sender, and records the decision. Free-form confirmations do not replace a signed button. An approval is valid only for its exact scope hash, owner, and expiry. Editing a candidate, call batch, or reel invalidates its approval.
 
 Hermes may request verification and summarize failures. It cannot set a passport color or production pointer. Promotion requires the exact candidate hash, passing contracts, no open blocker, and an authenticated release approval.
+
+For site onboarding, run verification before asking the merchant. If it passes, send the preview link and the one publish approval together. If it fails, repair reversible presentation issues automatically and re-verify; ask the merchant only when one consolidated factual clarification is genuinely required.
 
 ## Leads and calls
 

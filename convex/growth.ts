@@ -206,6 +206,18 @@ export const adminGetActiveDecisionPolicy = query({
   },
 });
 
+export const adminGetPreviewSite = query({
+  args: { serviceSecret: v.string(), siteId: v.string(), versionId: v.string(), specHash: v.string() },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const site = await context.db.query("sites").withIndex("by_slug", (range) => range.eq("slug", args.siteId)).unique();
+    if (!site || site.canaryVersionId !== args.versionId) return null;
+    const version = await context.db.query("siteVersions").withIndex("by_site_version", (range) => range.eq("siteId", site._id).eq("versionId", args.versionId)).unique();
+    if (!version || version.specHash !== args.specHash) return null;
+    return { specJson: version.specJson, versionId: version.versionId, specHash: version.specHash };
+  },
+});
+
 export const createCandidateInternal = internalMutation({
   args: { merchantId: v.string(), slug: v.string(), versionId: v.string(), parentVersionId: v.optional(v.string()), specJson: v.string(), specHash: v.string(), actor: v.string(), createdAt: v.number() },
   handler: async (context, args) => {
