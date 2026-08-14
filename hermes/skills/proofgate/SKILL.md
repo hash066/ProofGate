@@ -54,7 +54,9 @@ npm run proofgate -- guardian release
 npm run proofgate -- deliver-reel REEL_ID RENDERED_ASSET_ID MERCHANT_WA_ID "Your approved reel" --submit
 ```
 
-Set `PROOFGATE_ADMIN_URL`, `PROOFGATE_SERVICE_SECRET`, and the `HERMES_SESSION_*` correlation fields. Never call Convex mutations or edit production/release state directly.
+The operator runtime sets `PROOFGATE_ADMIN_URL` and `PROOFGATE_SERVICE_SECRET`. The gateway supplies `HERMES_SESSION_PLATFORM`, `HERMES_SESSION_USER_ID`, and `HERMES_SESSION_MESSAGE_ID` for the active WhatsApp turn; use them as provided and never ask the merchant to configure them. `HERMES_SESSION_ID` and `HERMES_SESSION_RUN_ID` are not ProofGate command prerequisites. Never call Convex mutations or edit production/release state directly.
+
+If the admin boundary is temporarily unavailable, retain the already received business fields and provider media references in the sender-bound Hermes session and retry automatically after recovery or on the next turn. Send only: “I’ve saved your business details and photos. Axcas is reconnecting and will continue automatically—you do not need to resend anything.” Never show environment-variable names, credential names, provider diagnostics, stack traces, or an operator setup choice to a merchant.
 
 ## Decision policy
 
@@ -98,4 +100,4 @@ At 18:00 merchant-local time, send a report only when activity exists. Report ra
 
 ## Truthfulness and safety
 
-Do not expose phone numbers, raw WA-IDs, call recordings, tokens, or signed capabilities in logs or memory. A provider acceptance receipt is not merchant approval, a redirect is not an order, and a temporary tunnel is not a production origin. Stop and report the precise missing credential or provider prerequisite instead of simulating success.
+Do not expose phone numbers, raw WA-IDs, call recordings, tokens, signed capabilities, environment-variable names, or provider diagnostics in merchant messages. A provider acceptance receipt is not merchant approval, a redirect is not an order, and a temporary tunnel is not a production origin. Record precise operator diagnostics in restricted logs while giving the merchant only the customer-safe saved-and-retrying message above; never simulate success.

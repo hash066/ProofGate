@@ -27,6 +27,13 @@ Resources:
       GenerateSecretString:
         ExcludePunctuation: true
         PasswordLength: 64
+  HermesAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Axcas Worker admin-boundary service credential for Hermes
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
   HermesRelayFunctionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -198,6 +205,9 @@ Resources:
               - Effect: Allow
                 Action: [secretsmanager:PutSecretValue]
                 Resource: !Ref HermesRelayProxySecret
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref HermesAdminSecret
   HermesProfile:
     Type: AWS::IAM::InstanceProfile
     Properties: { Roles: [!Ref HermesRole] }
@@ -262,4 +272,5 @@ Outputs:
   RelayOriginUrl: { Value: !Sub 'https://${HermesRelayApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}' }
   RelayQueueUrl: { Value: !Ref HermesRelayQueue }
   RelaySecretArn: { Value: !Ref HermesRelayProxySecret }
+  AdminSecretArn: { Value: !Ref HermesAdminSecret }
   AWSRegion: { Value: !Ref 'AWS::Region' }

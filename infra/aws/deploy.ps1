@@ -42,7 +42,8 @@ $bucket = aws cloudformation describe-stacks --stack-name $StackName --region $R
 $relayOrigin = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayOriginUrl'].OutputValue" --output text
 $relayQueue = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayQueueUrl'].OutputValue" --output text
 $relaySecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelaySecretArn'].OutputValue" --output text
-if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:') {
+$adminSecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='AdminSecretArn'].OutputValue" --output text
+if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:' -or $adminSecretArn -notmatch '^arn:') {
   throw "Stack outputs are incomplete."
 }
 
@@ -82,6 +83,7 @@ if ($LASTEXITCODE -ne 0 -or $status -ne "Success") { throw "Runtime installation
   RecordingsBucket = $bucket
   RelayOriginUrl = $relayOrigin
   RelayQueueUrl = $relayQueue
+  AdminSecretArn = $adminSecretArn
   RepositoryCommit = $RepositoryCommit
   RuntimeInstalled = $true
 }

@@ -89,6 +89,21 @@ describe("AWS Hermes runtime assets", () => {
     expect(template).toContain("RelayQueueUrl:");
   });
 
+  it("keeps the Hermes admin credential in Secrets Manager and syncs it without printing", async () => {
+    const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
+    const syncScript = await readFile("infra/aws/sync-hermes-admin-secret.mjs", "utf8");
+
+    expect(template).toContain("HermesAdminSecret:");
+    expect(template).toContain("Action: [secretsmanager:GetSecretValue]");
+    expect(template).toContain("Resource: !Ref HermesAdminSecret");
+    expect(template).toContain("AdminSecretArn:");
+    expect(syncScript).toContain("GetSecretValueCommand");
+    expect(syncScript).toContain("PROOFGATE_ADMIN_SECRET_ARN");
+    expect(syncScript).toContain("PROOFGATE_ADMIN_URL");
+    expect(syncScript).toContain("PROOFGATE_SERVICE_SECRET");
+    expect(syncScript).not.toContain("console.info(serviceSecret");
+  });
+
   it("installs the durable SQS relay as a restricted service", async () => {
     const unit = await readFile("infra/aws/systemd/proofgate-hermes-relay.service", "utf8");
     const script = await readFile("infra/aws/install-runtime.sh", "utf8");
