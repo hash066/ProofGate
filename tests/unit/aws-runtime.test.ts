@@ -47,6 +47,19 @@ describe("AWS Hermes runtime assets", () => {
     expect(script).toContain("systemctl enable proofgate-hermes-gateway.service");
   });
 
+  it("installs an explicit operator-funded model instead of falling back to OpenRouter", async () => {
+    const script = await readFile("infra/aws/install-runtime.sh", "utf8");
+    const config = await readFile("infra/aws/hermes-config.yaml", "utf8");
+
+    expect(config).toContain("default: moonshotai/Kimi-K2.6");
+    expect(config).toContain("provider: openai-api");
+    expect(config).toContain("base_url: https://api.studio.nebius.ai/v1");
+    expect(config).not.toMatch(/api.?key|access.?token|secret/i);
+    expect(script).toContain("infra/aws/hermes-config.yaml");
+    expect(script).toContain("/home/proofgate/.hermes/config.yaml");
+    expect(script).toContain("grep -q '^model:'");
+  });
+
   it("keeps AWS ingress closed and exposes deployment outputs", async () => {
     const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
     expect(template).not.toContain("SecurityGroupIngress");

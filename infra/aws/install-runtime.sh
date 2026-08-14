@@ -37,6 +37,18 @@ install -d -m 0750 -o proofgate -g proofgate /home/proofgate/.hermes /home/proof
 install -d -o proofgate -g proofgate /home/proofgate/.hermes/skills
 ln -sfn /opt/proofgate/ProofGate/hermes/skills/proofgate /home/proofgate/.hermes/skills/proofgate
 
+hermes_config=/home/proofgate/.hermes/config.yaml
+if ! grep -q '^model:' "${hermes_config}" 2>/dev/null; then
+  hermes_config_temp="$(mktemp)"
+  cat /opt/proofgate/ProofGate/infra/aws/hermes-config.yaml > "${hermes_config_temp}"
+  if [[ -s "${hermes_config}" ]]; then
+    printf '\n' >> "${hermes_config_temp}"
+    cat "${hermes_config}" >> "${hermes_config_temp}"
+  fi
+  install -m 0600 -o proofgate -g proofgate "${hermes_config_temp}" "${hermes_config}"
+  rm -f "${hermes_config_temp}"
+fi
+
 install -d -m 0750 -o root -g proofgate /etc/proofgate
 if [[ ! -e /etc/proofgate/origin.env ]]; then
   install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/origin.env

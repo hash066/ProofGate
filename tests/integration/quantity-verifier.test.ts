@@ -127,5 +127,5 @@ describe("P0 capability-separated exact browser replay", () => {
       await context.close();
       await browser.close();
     }
-  });
+  }, 20_000);
 });

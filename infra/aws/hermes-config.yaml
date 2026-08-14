@@ -1,0 +1,4 @@
+model:
+  default: moonshotai/Kimi-K2.6
+  provider: openai-api
+  base_url: https://api.studio.nebius.ai/v1
