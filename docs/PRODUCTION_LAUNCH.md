@@ -7,6 +7,12 @@ accounts. They send normal WhatsApp text, photos, voice notes, and an order/cont
 number. Axcas owns and operates the Meta app, Cloudflare Worker, Convex project,
 Hermes host, Vapi integration, and provider secrets.
 
+Initial site onboarding asks at most one consolidated factual question and has exactly
+one approval: publish the checked preview. Transcription, business-type inference,
+private storage, drafting, candidate creation, and verification are automatic. Calls,
+reel rendering, and social campaigns are separate optional actions and are not mixed
+into site onboarding.
+
 Future Instagram publishing must use a standard Meta OAuth consent screen. A merchant
 clicks **Connect Instagram** and can revoke access later; Axcas must never ask them
 to paste a token into WhatsApp.
