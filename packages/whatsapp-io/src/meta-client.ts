@@ -41,6 +41,11 @@ export async function sendApprovalButtons(input: MetaClientBase & { approvalId: 
   });
 }
 
+export async function sendTextMessage(input: MetaClientBase & { body: string }) {
+  if (input.body.length < 1 || input.body.length > 4096) throw new Error("WhatsApp text message is invalid");
+  return sendMetaMessage(input, { type: "text", text: { preview_url: false, body: input.body } });
+}
+
 export async function sendActionRequiredTemplate(input: MetaClientBase & { templateName: string }) {
   if (!/^[a-z0-9_]{3,512}$/.test(input.templateName)) throw new Error("invalid WhatsApp template name");
   return sendMetaMessage(input, { type: "template", template: { name: input.templateName, language: { code: "en" } } });

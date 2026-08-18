@@ -98,6 +98,46 @@ export default defineSchema({
     .index("by_merchant_id", ["merchantId"])
     .index("by_owner_wa_hash", ["ownerWaIdHash"]),
 
+  studioLinkRequests: defineTable({
+    linkId: v.string(),
+    codeHash: v.string(),
+    browserNonceHash: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    status: v.union(v.literal("pending"), v.literal("claimed"), v.literal("consumed")),
+    merchantId: v.optional(v.string()),
+    ownerWaIdHash: v.optional(v.string()),
+    providerMessageId: v.optional(v.string()),
+    expiresAt: v.number(),
+    claimedAt: v.optional(v.number()),
+    consumedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_link_id", ["linkId"])
+    .index("by_code_hash", ["codeHash"]),
+
+  studioSessions: defineTable({
+    sessionHash: v.string(),
+    merchantId: v.string(),
+    ownerWaIdHash: v.string(),
+    expiresAt: v.number(),
+    revokedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_session_hash", ["sessionHash"])
+    .index("by_merchant", ["merchantId"]),
+
+  studioProjects: defineTable({
+    projectId: v.string(),
+    revisionId: v.string(),
+    parentRevisionId: v.optional(v.string()),
+    merchantId: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    projectJson: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_project_revision", ["projectId", "revisionId"])
+    .index("by_merchant_created", ["merchantId", "createdAt"]),
+
   decisionPolicies: defineTable({
     policyId: v.string(),
     merchantId: v.string(),

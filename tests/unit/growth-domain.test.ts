@@ -10,6 +10,7 @@ import {
   initialBakerySiteSpec,
 } from "../../packages/domain/src/growth";
 import { createCallBatch, evaluateCallBatch } from "../../packages/release-policy/src/growth-policy";
+import { renderBusinessSite } from "../../packages/renderer/src/render-bakery-site";
 
 describe("WhatsApp growth domain", () => {
   it("validates the production-shaped bakery brief and site spec", () => {
@@ -53,6 +54,16 @@ describe("WhatsApp growth domain", () => {
       });
       expect(brief.businessType).toBe(businessType);
       expect(brief.catalog[0].priceMinor).toBeUndefined();
+    }
+  });
+
+  it("renders five complete constrained website styles from SiteSpec data", () => {
+    for (const layout of ["minimal", "editorial", "catalog", "services", "portfolio"] as const) {
+      const spec = SiteSpecV2Schema.parse({ ...initialBakerySiteSpec, theme: { ...initialBakerySiteSpec.theme, layout } });
+      const html = renderBusinessSite(spec, { versionId: `version-${layout}`, specHash: "a".repeat(64) });
+      expect(html).toContain(`data-pg-layout="${layout}"`);
+      expect(html).toContain('data-pg="catalog"');
+      expect(html).toContain('data-pg="primary-cta"');
     }
   });
 

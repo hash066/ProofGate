@@ -72,7 +72,11 @@ export const SiteSpecV2Schema = z.object({
     locale: z.literal("en-IN"),
     orderWhatsAppNumber: e164,
   }),
-  theme: z.object({ accent: z.string().regex(/^#[0-9a-fA-F]{6}$/), background: z.string().regex(/^#[0-9a-fA-F]{6}$/) }),
+  theme: z.object({
+    accent: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    background: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    layout: z.enum(["minimal", "editorial", "catalog", "services", "portfolio"]).optional(),
+  }),
   hero: z.object({ headline: safeText, subheadline: safeText, imageAssetId: assetId }),
   fulfillment: z.object({ area: safeText, leadTime: safeText }),
   catalog: z.array(CatalogItemSchema).min(1).max(24),

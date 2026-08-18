@@ -26,6 +26,12 @@ Approved reel -> atomic guardian claim -> AWS Polly + FFmpeg -> ffprobe -> priva
 Three reel variants -> one immutable social-campaign hash -> one merchant approval
                    -> Instagram publishing remains disabled until provider readiness
                    -> 2h/24h/72h normalized metrics -> winner or insufficient signal
+
+Merchant browser -> Axcas Studio (Website / Reels / Both)
+  -> short-lived browser nonce + prefilled AXCAS LINK message
+  -> Meta-signed sender claim -> HttpOnly merchant session
+  -> append-only project revisions + private reference uploads
+  -> constrained site layout / reel style profile -> same verifier and approval gates
 ```
 
 Hermes can interpret multimodal input and propose typed artifacts. It has no Convex mutation or release credential. The builder cannot verify, the verifier cannot mutate or promote, and passport state is derived from immutable version, hash, contract, approval, and release facts.
@@ -39,6 +45,8 @@ Hermes can interpret multimodal input and propose typed artifacts. It has no Con
 - Site slugs have an immutable merchant owner. Assets receive a tenant-prefixed canonical ID, while metrics, verification capabilities, releases, calls, reels, and campaigns resolve only inside that tenant.
 - Photos enter the hardened Convex File Storage foundation fallback under immutable asset IDs. The 16 MiB policy verifies magic bytes plus storage metadata SHA/size/type and rejects merchant/backend collisions. Raw storage URLs remain server-side; the public asset route resolves only IDs selected by a published spec. R2 remains an optional later backend.
 - `SiteSpecV2` is canonicalized and hashed. The renderer treats every field as untrusted text and emits no merchant scripts.
+- `theme.layout` selects one of five code-owned renderers (`minimal`, `editorial`, `catalog`, `services`, or `portfolio`). Merchants edit validated data and visual choices, never page code.
+- Studio authentication has no customer password or provider key. A ten-minute browser-bound nonce is claimed only by a valid Meta-signed `AXCAS LINK` message, then exchanged for a hashed, 30-day, Secure HttpOnly SameSite session. Projects are append-only revisions and uploads reuse the same tenant-scoped immutable storage boundary.
 - Page views and CTA clicks are append-only. A random first-party session value is hashed before ingestion; IP addresses are not stored.
 - The tracked CTA resolves the published version/item, records source and campaign, then redirects to the exact prefilled `wa.me` message.
 - Approval taps are accepted only from a valid Meta-signed body, a pending unexpired approval, and the bound merchant sender hash.
@@ -53,7 +61,7 @@ The consent assistant disables recording, logs, and transcript. The qualificatio
 
 ## Reel safety
 
-A plan references supplied asset IDs and claims only. Approval is bound to the canonical plan hash. The AWS worker atomically claims the plan, synthesizes English-India voice with Polly Kajal/Aditi, renders 1080×1920 H.264/AAC from the approved asset root, and checks dimensions/codecs/duration with ffprobe. It returns the file privately and has no social publishing credential.
+A plan references supplied asset IDs and claims only. Studio reference uploads become a versioned style profile with one of five clean-room formats, a palette, timing, and bounded text/image/video/shape layers. References are evidence of pacing and layout—not permission to copy another creator's footage, voice, identity, or exact expression. Approval is bound to the canonical plan hash. The AWS worker atomically claims the plan, optionally synthesizes English-India voice with Polly Kajal/Aditi, renders 1080×1920 H.264/AAC from the approved asset root, and checks dimensions/codecs/duration with ffprobe. It returns the file privately and has no social publishing credential.
 
 ## Deployment
 

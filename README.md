@@ -1,8 +1,8 @@
-# Axcas — WhatsApp Business Agent
+# Axcas — Small-business website and reel agent
 
-Axcas turns a small business owner’s WhatsApp voice note, prices, services, and photos into a verified business site with tracked WhatsApp enquiries—without requiring a laptop or dashboard. ProofGate remains the internal verification and release engine name.
+Axcas turns a small business owner’s voice note, prices, services, photos, and reference reels into a verified business site and original reel system. WhatsApp remains the fastest path; `/studio` is a guided visual workspace for merchants who want to choose layouts, formats, and layers. ProofGate remains the internal verification and release engine name.
 
-The P0 flow is intentionally narrow:
+The launch flow remains constrained:
 
 1. Hermes `v0.18.2` receives English voice, photos, and text through WhatsApp Business Cloud.
 2. Hermes submits typed intake and immutable assets through the `proofgate` command; it never writes Convex or release state directly.
@@ -12,8 +12,9 @@ The P0 flow is intentionally narrow:
 6. One exact, consented India/US lead batch may be approved for one-attempt Vapi qualification calls.
 7. Three reel angles can be proposed; one approved plan is rendered from merchant photos with AWS Polly and FFmpeg and returned privately.
 8. Hermes reports raw views/clicks and proposes—not publishes—a verified improvement.
+9. Axcas Studio offers Website, Reels, or Both, with WhatsApp-linked passwordless access, append-only project revisions, private uploads, five site layouts, five human-led reel formats, and editable hook/proof/CTA layers.
 
-No dashboard, payments, scraped leads, synthetic product imagery, automatic posting, or autonomous publishing is included.
+There is no blank-canvas site-code editor, payment flow, scraped lead source, synthetic product imagery, automatic posting, or autonomous publishing.
 
 ## Run locally
 
@@ -47,6 +48,7 @@ Commands validate locally by default. Add `--submit` only from the configured He
 | Path | Responsibility |
 |---|---|
 | `packages/domain/src/growth.ts` | Business, site, consent, approval, outcome, and reel schemas |
+| `packages/domain/src/studio.ts` | Studio intent, project, reel style-profile, layer, and approval-checklist schemas |
 | `packages/renderer/src/render-bakery-site.ts` | Constrained, XSS-safe catalog renderer |
 | `packages/release-policy/src/growth-policy.ts` | Immutable call-batch hash and approval predicate |
 | `packages/whatsapp-io` | Meta signature parsing, buttons, and template adapter |
@@ -60,13 +62,18 @@ Commands validate locally by default. Add `--submit` only from the configured He
 ## Public surface
 
 - `GET /s/:slug` — published small-business site
+- `GET /studio` — guided website/reel workspace
+- `POST /api/studio/link` — short-lived WhatsApp account link
+- `POST /api/studio/link/status` — browser-bound session exchange
+- `GET|POST /api/studio/projects` — authenticated append-only project revisions
+- `PUT /api/studio/assets/:assetId` — authenticated private reference upload
 - `GET /r/whatsapp/:siteId/:itemId` — tracked order redirect
 - `GET /proof/:slug` — Proof Passport
 - `GET /assets/:assetId` — explicitly selected immutable media
 - `GET|POST /whatsapp/webhook` — Meta verification, approval interception, Hermes forwarding
 - `POST /webhooks/vapi` — authenticated structured call outcome
 
-All administrative mutation routes are bearer-authenticated and intended only for the Hermes command boundary.
+All remaining administrative mutation routes are bearer-authenticated and intended only for the Hermes command boundary. Studio mutations require a secure HttpOnly session minted only after a Meta-signed WhatsApp link message.
 
 ## Deployment truth
 

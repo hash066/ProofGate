@@ -12,6 +12,143 @@ function requireServiceSecret(value: string) {
   if (different !== 0) throw new Error("unauthorized ProofGate service call");
 }
 
+export const createStudioLinkInternal = internalMutation({
+  args: {
+    linkId: v.string(), codeHash: v.string(), browserNonceHash: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    expiresAt: v.number(), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const existingLink = await context.db.query("studioLinkRequests").withIndex("by_link_id", (range) => range.eq("linkId", args.linkId)).unique();
+    const existingCode = await context.db.query("studioLinkRequests").withIndex("by_code_hash", (range) => range.eq("codeHash", args.codeHash)).unique();
+    if (existingLink || existingCode) throw new Error("studio link collision");
+    await context.db.insert("studioLinkRequests", { ...args, status: "pending" });
+    return { created: true };
+  },
+});
+
+export const adminCreateStudioLink = action({
+  args: {
+    serviceSecret: v.string(), linkId: v.string(), codeHash: v.string(), browserNonceHash: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    expiresAt: v.number(), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ created: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.createStudioLinkInternal, record);
+  },
+});
+
+export const claimStudioLinkInternal = internalMutation({
+  args: { codeHash: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(), providerMessageId: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    const link = await context.db.query("studioLinkRequests").withIndex("by_code_hash", (range) => range.eq("codeHash", args.codeHash)).unique();
+    if (!link || link.expiresAt < args.now || link.status === "consumed") return { linked: false as const };
+    if (link.status === "claimed") {
+      return { linked: link.merchantId === args.merchantId && link.ownerWaIdHash === args.ownerWaIdHash };
+    }
+    await context.db.patch(link._id, {
+      status: "claimed", merchantId: args.merchantId, ownerWaIdHash: args.ownerWaIdHash,
+      providerMessageId: args.providerMessageId, claimedAt: args.now,
+    });
+    return { linked: true as const };
+  },
+});
+
+export const adminClaimStudioLink = action({
+  args: { serviceSecret: v.string(), codeHash: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(), providerMessageId: v.string(), now: v.number() },
+  handler: async (context, args): Promise<{ linked: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.claimStudioLinkInternal, record);
+  },
+});
+
+export const completeStudioLinkInternal = internalMutation({
+  args: { linkId: v.string(), browserNonceHash: v.string(), sessionHash: v.string(), sessionExpiresAt: v.number(), now: v.number() },
+  handler: async (context, args) => {
+    const link = await context.db.query("studioLinkRequests").withIndex("by_link_id", (range) => range.eq("linkId", args.linkId)).unique();
+    if (!link || link.browserNonceHash !== args.browserNonceHash || link.expiresAt < args.now) return { status: "expired" as const };
+    if (link.status === "consumed") {
+      const existingSession = await context.db.query("studioSessions").withIndex("by_session_hash", (range) => range.eq("sessionHash", args.sessionHash)).unique();
+      return existingSession && existingSession.merchantId === link.merchantId
+        ? { status: "authenticated" as const, merchantId: link.merchantId!, ownerWaIdHash: link.ownerWaIdHash!, intent: link.intent }
+        : { status: "expired" as const };
+    }
+    if (link.status === "pending" || !link.merchantId || !link.ownerWaIdHash) return { status: "pending" as const };
+    const existingSession = await context.db.query("studioSessions").withIndex("by_session_hash", (range) => range.eq("sessionHash", args.sessionHash)).unique();
+    if (existingSession) throw new Error("studio session collision");
+    await context.db.insert("studioSessions", {
+      sessionHash: args.sessionHash, merchantId: link.merchantId, ownerWaIdHash: link.ownerWaIdHash,
+      expiresAt: args.sessionExpiresAt, createdAt: args.now,
+    });
+    await context.db.patch(link._id, { status: "consumed", consumedAt: args.now });
+    return { status: "authenticated" as const, merchantId: link.merchantId, ownerWaIdHash: link.ownerWaIdHash, intent: link.intent };
+  },
+});
+
+export const adminCompleteStudioLink = action({
+  args: { serviceSecret: v.string(), linkId: v.string(), browserNonceHash: v.string(), sessionHash: v.string(), sessionExpiresAt: v.number(), now: v.number() },
+  handler: async (context, args): Promise<{ status: "pending" | "expired" | "authenticated"; merchantId?: string; ownerWaIdHash?: string; intent?: "website" | "reels" | "both" }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.completeStudioLinkInternal, record);
+  },
+});
+
+export const adminGetStudioSession = query({
+  args: { serviceSecret: v.string(), sessionHash: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const session = await context.db.query("studioSessions").withIndex("by_session_hash", (range) => range.eq("sessionHash", args.sessionHash)).unique();
+    if (!session || session.revokedAt || session.expiresAt < args.now) return null;
+    return { merchantId: session.merchantId, ownerWaIdHash: session.ownerWaIdHash, expiresAt: session.expiresAt };
+  },
+});
+
+export const saveStudioProjectInternal = internalMutation({
+  args: {
+    projectId: v.string(), revisionId: v.string(), parentRevisionId: v.optional(v.string()), merchantId: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")), projectJson: v.string(), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const existingRevision = await context.db.query("studioProjects").withIndex("by_project_revision", (range) => range.eq("projectId", args.projectId).eq("revisionId", args.revisionId)).unique();
+    if (existingRevision) return { inserted: false };
+    const projectRevisions = (await context.db.query("studioProjects").withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId)).collect()).filter((entry) => entry.projectId === args.projectId);
+    if (projectRevisions.length && !args.parentRevisionId) throw new Error("studio project revision requires a parent");
+    if (args.parentRevisionId && !projectRevisions.some((entry) => entry.revisionId === args.parentRevisionId)) throw new Error("studio project parent revision not found");
+    await context.db.insert("studioProjects", args);
+    return { inserted: true };
+  },
+});
+
+export const adminSaveStudioProject = action({
+  args: {
+    serviceSecret: v.string(), projectId: v.string(), revisionId: v.string(), parentRevisionId: v.optional(v.string()), merchantId: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")), projectJson: v.string(), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ inserted: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.saveStudioProjectInternal, record);
+  },
+});
+
+export const adminListStudioProjects = query({
+  args: { serviceSecret: v.string(), merchantId: v.string() },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const revisions = await context.db.query("studioProjects").withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId)).order("desc").collect();
+    const latest = new Map<string, typeof revisions[number]>();
+    for (const revision of revisions) if (!latest.has(revision.projectId)) latest.set(revision.projectId, revision);
+    return Array.from(latest.values()).map((entry) => ({
+      projectId: entry.projectId, revisionId: entry.revisionId, parentRevisionId: entry.parentRevisionId,
+      intent: entry.intent, projectJson: entry.projectJson, createdAt: entry.createdAt,
+    }));
+  },
+});
+
 export const getPublishedSite = query({
   args: { slug: v.string() },
   handler: async (context, { slug }) => {

@@ -7,6 +7,33 @@ MVP vertical: one-page workshop, event, booking, or lead page
 Primary operator surface: WhatsApp Business Cloud through Hermes
 Build window: eight hours  
 
+## 2026-08-18 approved Product Hunt scope amendment
+
+WhatsApp remains the fastest merchant surface, but it is no longer the only surface.
+Axcas also provides a guided customer-facing web Studio that begins with exactly one
+choice: Website, Reels, or Both. Studio access is passwordless and bound to a short-lived
+browser nonce claimed by a Meta-signed WhatsApp sender; customers never provide cloud,
+storage, model, or social-provider credentials. Project revisions and supplied reference
+media stay tenant-scoped and private.
+
+The Studio is not a free-form HTML/code generator or an operator dashboard. It edits
+validated project data, one of five code-owned `SiteSpecV2` layouts, and structured reel
+style profiles with bounded layers. Agents still never emit or patch page code. The five
+initial reel formats are kinetic hook, split explainer, face + proof, visual breakdown,
+and comment/review reveal. Recommendations must be human-led and based on dated platform,
+category, merchant-media, or merchant-performance signals; “AI-generated” is not a
+creative format. Reference reels may inform pacing, palette, and composition but never
+authorize copying another creator's footage, face, voice, identity, branding, or exact
+expression.
+
+Every high-impact approval is presented as one plain-language checklist for the exact
+immutable scope. Website publication remains one approval after verification. One final
+reel render, one consented call batch, and one exact three-variation social experiment
+remain separate approvals. Hosting, storage, rendering, and provider integrations are an
+Axcas-operated package. Existing verifier, release, append-only, consent, and truthful-
+evidence rules are unchanged; automatic social posting remains gated on its separate
+provider acceptance.
+
 ## 2026-08-13 approved SME scope amendment
 
 ProofGate serves English-speaking small businesses, starting with constrained types:

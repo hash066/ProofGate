@@ -4,18 +4,20 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { initialSpikeSiteSpec, SiteSpecSchema } from "../../../packages/domain/src/site-spec";
 import { BusinessBriefInputSchema, BusinessBriefSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type LeadConsentV1, type ReelPlanV1, type SiteSpecV2 } from "../../../packages/domain/src/growth";
+import { StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
 import { renderBusinessSite } from "../../../packages/renderer/src/render-bakery-site";
 import { renderProductHome } from "../../../packages/renderer/src/render-product-home";
+import { renderStudio, renderStudioCss, renderStudioJs } from "../../../packages/renderer/src/render-studio";
 import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from "../../../packages/renderer/src/render-legal";
 import { renderSite } from "../../../packages/renderer/src/render-site";
 import { authenticateVapiWebhook } from "../../../packages/calls/src/vapi";
 import { createQualificationCalls } from "../../../packages/calls/src/vapi-client";
 import { createCallBatch, type CallBatch } from "../../../packages/release-policy/src/growth-policy";
 import { createSocialCampaign, type SocialCampaign } from "../../../packages/social/src/experiment";
-import { sendActionRequiredTemplate, sendApprovalButtons, sendVideoByMediaId, uploadMetaMedia } from "../../../packages/whatsapp-io/src/meta-client";
-import { extractProofGateApproval, verifyMetaWebhookSignature } from "../../../packages/whatsapp-io/src/meta-webhook";
+import { sendActionRequiredTemplate, sendApprovalButtons, sendTextMessage, sendVideoByMediaId, uploadMetaMedia } from "../../../packages/whatsapp-io/src/meta-client";
+import { extractProofGateApproval, extractStudioLinkMessage, verifyMetaWebhookSignature } from "../../../packages/whatsapp-io/src/meta-webhook";
 
 type Bindings = {
   CONVEX_URL?: string;
@@ -33,6 +35,7 @@ type Bindings = {
   META_PHONE_NUMBER_ID?: string;
   META_ACCESS_TOKEN?: string;
   META_ACTION_REQUIRED_TEMPLATE?: string;
+  AXCAS_WHATSAPP_NUMBER?: string;
   PROOFGATE_ASSETS?: R2Bucket;
   PROOFGATE_CONFIG?: KVNamespace;
 };
@@ -86,6 +89,12 @@ export type GrowthAdminBoundary = {
   promoteRelease: (bindings?: Bindings) => Promise<unknown>;
   saveDecisionPolicy: (input: { policy: DecisionPolicyV1; policyHash: string }, bindings?: Bindings) => Promise<unknown>;
   getDecisionPolicy: (merchantId: string, bindings?: Bindings) => Promise<DecisionPolicyV1 | null>;
+  createStudioLink: (input: { linkId: string; codeHash: string; browserNonceHash: string; intent: StudioIntent; expiresAt: number }, bindings?: Bindings) => Promise<unknown>;
+  claimStudioLink: (input: { codeHash: string; merchantId: string; ownerWaIdHash: string; providerMessageId: string }, bindings?: Bindings) => Promise<{ linked: boolean }>;
+  completeStudioLink: (input: { linkId: string; browserNonceHash: string; sessionHash: string; sessionExpiresAt: number }, bindings?: Bindings) => Promise<{ status: "pending" | "expired" | "authenticated"; merchantId?: string; ownerWaIdHash?: string; intent?: StudioIntent }>;
+  getStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ merchantId: string; ownerWaIdHash: string; expiresAt: number } | null>;
+  saveStudioProject: (input: { projectId: string; revisionId: string; parentRevisionId?: string; merchantId: string; intent: StudioIntent; project: StudioProjectInput }, bindings?: Bindings) => Promise<unknown>;
+  listStudioProjects: (merchantId: string, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; project: StudioProjectInput; createdAt: number }>>;
 };
 
 function canonicalize(value: unknown): string {
@@ -146,6 +155,18 @@ function hasValidAssetSignature(contentType: string, body: Uint8Array): boolean 
 function sessionIdFromCookie(cookie: string | undefined): string | null {
   const match = /(?:^|;\s*)pgsid=([a-zA-Z0-9-]{8,64})(?:;|$)/.exec(cookie ?? "");
   return match?.[1] ?? null;
+}
+
+function cookieValue(cookie: string | undefined, name: string): string | null {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)(?:;|$)`).exec(cookie ?? "");
+  return match?.[1] ?? null;
+}
+
+function randomStudioCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
 const liveGrowthBoundary: GrowthBoundary = {
@@ -300,6 +321,29 @@ const liveAdminBoundary: GrowthAdminBoundary = {
     }) as null | { policyJson: string };
     return result ? DecisionPolicySchema.parse(JSON.parse(result.policyJson)) : null;
   },
+  createStudioLink: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateStudioLink, {
+    serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now(),
+  }),
+  claimStudioLink: (input, bindings) => adminClient(bindings).action((api as any).growth.adminClaimStudioLink, {
+    serviceSecret: serviceSecret(bindings), ...input, now: Date.now(),
+  }),
+  completeStudioLink: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCompleteStudioLink, {
+    serviceSecret: serviceSecret(bindings), ...input, now: Date.now(),
+  }),
+  getStudioSession: (sessionHash, bindings) => adminClient(bindings).query((api as any).growth.adminGetStudioSession, {
+    serviceSecret: serviceSecret(bindings), sessionHash, now: Date.now(),
+  }),
+  saveStudioProject: (input, bindings) => adminClient(bindings).action((api as any).growth.adminSaveStudioProject, {
+    serviceSecret: serviceSecret(bindings), projectId: input.projectId, revisionId: input.revisionId,
+    parentRevisionId: input.parentRevisionId, merchantId: input.merchantId, intent: input.intent,
+    projectJson: JSON.stringify(input.project), createdAt: Date.now(),
+  }),
+  listStudioProjects: async (merchantId, bindings) => {
+    const projects = await adminClient(bindings).query((api as any).growth.adminListStudioProjects, {
+      serviceSecret: serviceSecret(bindings), merchantId,
+    }) as Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; projectJson: string; createdAt: number }>;
+    return projects.map((project) => ({ ...project, project: StudioProjectInputSchema.parse(JSON.parse(project.projectJson)) }));
+  },
 };
 
 function adminAuthorized(authorization: string | undefined, bindings?: Bindings): boolean {
@@ -402,6 +446,90 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   }));
+  app.get("/studio", (context) => context.html(renderStudio(), 200, {
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
+  }));
+  app.get("/studio.css", (context) => context.body(renderStudioCss(), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
+  app.get("/studio.js", (context) => context.body(renderStudioJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
+  app.post("/api/studio/link", async (context) => {
+    let intent: StudioIntent;
+    try { intent = StudioIntentSchema.parse((await context.req.json() as { intent?: unknown }).intent); } catch { return context.text("Choose website, reels, or both", 400); }
+    const linkId = `link-${crypto.randomUUID()}`;
+    const code = randomStudioCode();
+    const browserNonce = base64UrlEncode(crypto.getRandomValues(new Uint8Array(24)));
+    const expiresAt = Date.now() + 10 * 60_000;
+    await adminBoundary.createStudioLink({ linkId, codeHash: await sha256(code), browserNonceHash: await sha256(browserNonce), intent, expiresAt }, context.env);
+    const number = (context.env?.AXCAS_WHATSAPP_NUMBER ?? "15556537153").replace(/\D/g, "");
+    return context.json({ whatsappUrl: `https://wa.me/${number}?text=${encodeURIComponent(`AXCAS LINK ${code}`)}`, expiresAt }, 201, {
+      "cache-control": "no-store",
+      "set-cookie": `axcas_link=${linkId}.${browserNonce}; Path=/api/studio; Max-Age=600; Secure; HttpOnly; SameSite=Lax`,
+    });
+  });
+  app.post("/api/studio/link/status", async (context) => {
+    const linkCookie = cookieValue(context.req.header("cookie"), "axcas_link");
+    const separator = linkCookie?.indexOf(".") ?? -1;
+    if (!linkCookie || separator < 6) return context.text("Studio link is missing", 401);
+    const linkId = linkCookie.slice(0, separator);
+    const browserNonce = linkCookie.slice(separator + 1);
+    if (!/^link-[0-9a-f-]{36}$/.test(linkId) || !/^[A-Za-z0-9_-]{20,64}$/.test(browserNonce)) return context.text("Studio link is invalid", 401);
+    const rawSession = await previewSignature(`${linkId}.${browserNonce}`, serviceSecret(context.env));
+    const sessionExpiresAt = Date.now() + 30 * 86_400_000;
+    const result = await adminBoundary.completeStudioLink({
+      linkId, browserNonceHash: await sha256(browserNonce), sessionHash: await sha256(rawSession), sessionExpiresAt,
+    }, context.env);
+    if (result.status === "pending") return context.json({ status: "pending" }, 202, { "cache-control": "no-store" });
+    if (result.status !== "authenticated") return context.text("Studio link expired", 410);
+    return context.json({ status: "authenticated", intent: result.intent }, 200, {
+      "cache-control": "no-store",
+      "set-cookie": `axcas_session=${rawSession}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax`,
+    });
+  });
+  async function studioSession(cookie: string | undefined, bindings?: Bindings) {
+    const raw = cookieValue(cookie, "axcas_session");
+    if (!raw || !/^[A-Za-z0-9_-]{30,100}$/.test(raw)) return null;
+    return adminBoundary.getStudioSession(await sha256(raw), bindings);
+  }
+  app.get("/api/studio/me", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    return session ? context.json({ authenticated: true }, 200, { "cache-control": "no-store" }) : context.text("Unauthorized", 401);
+  });
+  app.get("/api/studio/projects", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    return context.json({ projects: await adminBoundary.listStudioProjects(session.merchantId, context.env) }, 200, { "cache-control": "no-store" });
+  });
+  app.post("/api/studio/projects", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    let project: StudioProjectInput;
+    try { project = StudioProjectInputSchema.parse(await context.req.json()); } catch { return context.text("Project details are invalid", 400); }
+    const projectId = project.projectId ?? `project-${crypto.randomUUID()}`;
+    const revisionId = `revision-${crypto.randomUUID()}`;
+    const stored = StudioProjectInputSchema.parse({ ...project, projectId });
+    const result = await adminBoundary.saveStudioProject({ projectId, revisionId, parentRevisionId: stored.parentRevisionId, merchantId: session.merchantId, intent: stored.intent, project: stored }, context.env);
+    return context.json({ projectId, revisionId, result }, 201, { "cache-control": "no-store" });
+  });
+  app.put("/api/studio/assets/:localAssetId", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const projectId = context.req.header("x-axcas-project-id");
+    if (!projectId || !(await adminBoundary.listStudioProjects(session.merchantId, context.env)).some((project) => project.projectId === projectId)) return context.text("Project not found", 404);
+    const localAssetId = context.req.param("localAssetId");
+    const contentType = context.req.header("content-type") ?? "application/octet-stream";
+    if (!/^[a-zA-Z0-9_-]{3,100}$/.test(localAssetId)) return context.text("Invalid asset metadata", 400);
+    if (!/^image\/(jpeg|png|webp)$/.test(contentType) && contentType !== "video/mp4") return context.text("Unsupported asset type", 415);
+    const body = new Uint8Array(await context.req.arrayBuffer());
+    if (body.byteLength === 0 || body.byteLength > MAX_ASSET_BYTES) return context.text("Asset size is invalid", 413);
+    if (!hasValidAssetSignature(contentType, body)) return context.text("Asset content does not match its declared type", 415);
+    const assetId = tenantScopedAssetId(session, localAssetId);
+    const result = await adminBoundary.uploadAsset({
+      assetId, merchantId: session.merchantId, sha256: await sha256Bytes(body), contentType, byteLength: body.byteLength,
+      sourceProviderMessageId: `studio:${projectId}:${crypto.randomUUID()}`, body,
+    }, context.env);
+    return context.json({ accepted: true, assetId, storageBackend: result.storageBackend }, 201);
+  });
   const legalHeaders = {
     "cache-control": "public, max-age=3600",
     "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
@@ -517,6 +645,23 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       const result = await growthBoundary.resolveApproval(approval, context.env);
       return context.json(result, result.accepted ? 200 : 409);
     }
+    const studioLink = extractStudioLinkMessage(payload);
+    if (studioLink) {
+      const tenant = await deriveTenantIdentity(studioLink.senderWaId);
+      const result = await adminBoundary.claimStudioLink({
+        codeHash: await sha256(studioLink.code), merchantId: tenant.merchantId,
+        ownerWaIdHash: tenant.ownerWaIdHash, providerMessageId: studioLink.providerMessageId,
+      }, context.env);
+      if (!result.linked) return context.json({ linked: false }, 409);
+      if (context.env?.META_PHONE_NUMBER_ID && context.env.META_ACCESS_TOKEN) {
+        await sendTextMessage({
+          graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
+          accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: studioLink.senderWaId,
+          body: "✅ Browser linked. Return to Axcas Studio—your workspace will unlock automatically.",
+        });
+      }
+      return context.json({ linked: true }, 200);
+    }
     return growthBoundary.forwardToHermes(rawBody, context.req.raw.headers, context.env);
   });
   app.post("/webhooks/vapi", async (context) => {
@@ -617,7 +762,9 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     await adminBoundary.createApproval({ approvalId, merchantId: payload.merchantId, type: "release", scopeHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     const recipientWaId = context.req.header("x-hermes-user-id")?.replace(/\D/g, "");
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env.META_ACCESS_TOKEN) return context.json({ accepted: true, requestId, approvalId, scopeHash, delivery: "blocked_missing_meta_configuration" }, 202);
-    const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: `Publish verified bakery version ${payload.versionId}?` });
+    const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: formatApprovalChecklist({
+      type: "release", subject: `${payload.siteId} website`, details: ["Private preview reviewed", "Mobile layout and WhatsApp buttons verified", "Only supplied claims and selected media"],
+    }) });
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, requestId, approvalId, scopeHash, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -645,7 +792,10 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     await adminBoundary.createApproval({ approvalId, merchantId: batch.merchantId, type: "call_batch", scopeHash: batch.scopeHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     const recipientWaId = context.req.header("x-hermes-user-id")?.replace(/\D/g, "");
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env?.META_ACCESS_TOKEN) return context.json({ accepted: true, approvalId, delivery: "blocked_missing_meta_configuration" }, 202);
-    const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: `Approve ${batch.leadIds.length} consented qualification call${batch.leadIds.length === 1 ? "" : "s"}? Budget cap: $${batch.costCapUsd.toFixed(2)}. One attempt per lead.` });
+    const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: formatApprovalChecklist({
+      type: "call_batch", subject: `${batch.leadIds.length} qualification call${batch.leadIds.length === 1 ? "" : "s"}`,
+      details: ["Merchant-supplied consent checked", "India/US policy checked", `One attempt per lead · cap $${batch.costCapUsd.toFixed(2)}`, "Recording starts only after spoken consent"],
+    }) });
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, approvalId, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -661,7 +811,9 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     await adminBoundary.createApproval({ approvalId, merchantId: plan.merchantId, type: "reel", scopeHash: planHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     const recipientWaId = context.req.header("x-hermes-user-id")?.replace(/\D/g, "");
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env?.META_ACCESS_TOKEN) return context.json({ accepted: true, approvalId, planHash, delivery: "blocked_missing_meta_configuration" }, 202);
-    const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: `Render reel angle: ${plan.angle}` });
+    const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: formatApprovalChecklist({
+      type: "reel", subject: plan.angle, details: ["Uses selected merchant media", "Claims checked against supplied facts", "9:16 render and safe overlays", "Returned privately; not auto-posted"],
+    }) });
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, approvalId, planHash, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -687,7 +839,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     const receipt = await sendApprovalButtons({
       graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
       accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId,
-      body: "Approve this exact Instagram experiment: three scheduled reel variations, one approval, no extra posts?",
+      body: formatApprovalChecklist({ type: "social_campaign", subject: "Instagram three-variation experiment", details: ["Exactly three approved reels", "Captions and schedules locked", "2h, 24h and 72h checks", "No fourth post or silent edits"] }),
     });
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, approvalId, scopeHash: campaign.scopeHash, providerMessageId: receipt.providerMessageId }, 201);

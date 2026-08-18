@@ -4,8 +4,8 @@ export function renderProductHome(): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Axcas turns a WhatsApp voice note, photos, and prices into a verified small-business storefront.">
-  <title>Axcas — WhatsApp business agent</title>
+  <meta name="description" content="Axcas builds complete small-business websites and original reels from WhatsApp or a guided web studio.">
+  <title>Axcas — websites and reels for small businesses</title>
   <style>
     :root{color-scheme:light;--ink:#241b18;--muted:#6d615d;--paper:#fffaf5;--card:#fff;--line:#eadfd6;--green:#176b49;--lime:#dff6df;--peach:#ffdfc4;--accent:#eb6d3c}
     *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:linear-gradient(180deg,#fff7ef 0,#fffaf5 32rem,#f7f4ef 100%);color:var(--ink);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -25,9 +25,9 @@ export function renderProductHome(): string {
     <section class="shell hero">
       <div>
         <div class="eyebrow">For small businesses</div>
-        <h1>Your business online. No dashboard needed.</h1>
-        <p class="lead">Send one WhatsApp message. Axcas turns your photos, offerings, and voice note into a verified business page with WhatsApp enquiries—then helps improve it.</p>
-        <div class="actions"><a class="button primary" data-pg="start-whatsapp" href="https://wa.me/15556537153?text=START%20AXCAS" rel="noopener noreferrer">Test Axcas in WhatsApp</a><a class="button secondary" href="#journey">See the merchant journey</a></div>
+        <h1>Websites and reels, without the agency maze.</h1>
+        <p class="lead">Start in WhatsApp for speed or use Axcas Studio for visual control. Your business details, real media, hosting, storage and feedback loop stay in one service.</p>
+        <div class="actions"><a class="button primary" data-pg="start-whatsapp" href="https://wa.me/15556537153?text=START%20AXCAS" rel="noopener noreferrer">Start in WhatsApp</a><a class="button secondary" data-pg="start-studio" href="/studio">Open Axcas Studio</a></div>
         <p class="micro">Tailors · tutors · salons · home services · retailers · bakeries · and more</p>
       </div>
       <div class="phone" aria-label="Demo WhatsApp conversation">
@@ -44,9 +44,9 @@ export function renderProductHome(): string {
     </section>
 
     <section class="shell" id="journey">
-      <div class="section-head"><h2>One conversation from idea to customers.</h2><p>The merchant stays in WhatsApp. Axcas handles the structured work behind it.</p></div>
+      <div class="section-head"><h2>One business, two simple ways to build.</h2><p>Chat when you want speed. Open the guided Studio when you want to choose layouts, reel formats and reference media.</p></div>
       <div class="steps">
-        <article class="step"><div class="num">1</div><h3>Describe the business</h3><p>Send a voice note, offerings, area, and any real photos. The agent identifies your business type.</p></article>
+        <article class="step"><div class="num">1</div><h3>Choose the outcome</h3><p>Website, reels, or both. Describe the business in WhatsApp or the guided Studio.</p></article>
         <article class="step"><div class="num">2</div><h3>Review one preview</h3><p>The agent builds a constrained business page and independently checks it before asking.</p></article>
         <article class="step"><div class="num">3</div><h3>Approve in WhatsApp</h3><p>A signed approval publishes exactly the version the merchant reviewed.</p></article>
         <article class="step"><div class="num">4</div><h3>Improve with evidence</h3><p>Views and order-clicks return to WhatsApp. Any page change needs fresh approval.</p></article>
@@ -57,7 +57,7 @@ export function renderProductHome(): string {
       <div class="section-head"><h2>What the merchant gets.</h2><p>No account portal to learn and no blank website editor to fight.</p></div>
       <div class="outcomes">
         <article class="outcome"><h3>Verified business page</h3><p>A fast mobile page with products or services, pricing when supplied, business details, and tracked WhatsApp buttons.</p></article>
-        <article class="outcome"><h3>Private reel draft</h3><p>Three creative angles and one approved vertical video made only from supplied business photos.</p></article>
+        <article class="outcome"><h3>Original reel system</h3><p>Trend-aware human-led formats, editable layers, and approved vertical videos made from supplied business media.</p></article>
         <article class="outcome"><h3>Plain-language report</h3><p>Views, order clicks, and one evidence-backed improvement proposal delivered in chat.</p></article>
       </div>
     </section>

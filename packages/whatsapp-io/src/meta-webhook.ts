@@ -1,4 +1,5 @@
 type ApprovalTap = { approvalId: string; decision: "approved" | "denied"; senderWaId: string; providerMessageId: string };
+export type StudioLinkMessage = { code: string; senderWaId: string; providerMessageId: string };
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -35,6 +36,27 @@ export function extractProofGateApproval(payload: unknown): ApprovalTap | null {
     const match = /^pg:([a-z0-9-]{3,64}):(approve|deny)$/.exec(id ?? "");
     if (!match || typeof message.from !== "string" || typeof message.id !== "string") continue;
     return { approvalId: match[1], decision: match[2] === "approve" ? "approved" : "denied", senderWaId: message.from, providerMessageId: message.id };
+  }
+  return null;
+}
+
+export function extractStudioLinkMessage(payload: unknown): StudioLinkMessage | null {
+  if (!payload || typeof payload !== "object") return null;
+  const entries = (payload as { entry?: unknown }).entry;
+  if (!Array.isArray(entries)) return null;
+  for (const entry of entries) {
+    const changes = (entry as { changes?: unknown })?.changes;
+    if (!Array.isArray(changes)) continue;
+    for (const change of changes) {
+      const messages = (change as { value?: { messages?: unknown } })?.value?.messages;
+      if (!Array.isArray(messages)) continue;
+      for (const message of messages) {
+        const value = message as { from?: unknown; id?: unknown; type?: unknown; text?: { body?: unknown } };
+        if (value.type !== "text" || typeof value.from !== "string" || typeof value.id !== "string" || typeof value.text?.body !== "string") continue;
+        const match = /^\s*AXCAS\s+LINK\s+([A-Z0-9]{6,10})\s*$/i.exec(value.text.body);
+        if (match) return { code: match[1].toUpperCase(), senderWaId: value.from, providerMessageId: value.id };
+      }
+    }
   }
   return null;
 }

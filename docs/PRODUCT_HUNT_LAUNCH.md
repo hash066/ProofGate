@@ -1,0 +1,38 @@
+# Axcas Product Hunt launch gate
+
+## Positioning
+
+**Axcas builds a small business's website and original reels from WhatsApp or one guided studio—then learns from real clicks and engagement.**
+
+The launch demo should show one continuous merchant story:
+
+1. Choose **Website**, **Reels**, or **Both**.
+2. Link the browser with one prefilled WhatsApp message.
+3. Choose a complete site layout and a human-led reel format.
+4. Upload real business media or a reference reel and adjust the hook, proof, CTA, colour, and pacing layers.
+5. Receive a checked private preview and one approval checklist.
+6. Publish the verified site; keep the reel private unless a separate campaign is approved.
+7. Show tracked website clicks and normalized reel feedback without claiming guaranteed growth.
+
+## Launch packaging
+
+- **Free Product Hunt beta:** one website preview and three reel recommendations.
+- **Website:** ₹499/month including hosting, storage, tracked WhatsApp CTA, and verified updates.
+- **Reels:** ₹499 per three-angle pack with one approved render.
+- **Both:** ₹799/month during the founding pilot.
+
+Provider-heavy calls, paid Meta conversations, ad spend, and additional renders stay outside the base allowance. Do not add billing until the production WhatsApp path and first two merchant acceptances pass.
+
+## Honest readiness
+
+The original WhatsApp MVP is about 96% implemented. Against the expanded Product Hunt scope, code readiness is about 74% before the first Studio production deployment. The remaining public-launch gates are:
+
+- production Meta number and one real general-user run;
+- web project → generated candidate → verifier → checklist approval → publish handoff;
+- one real reference-reel style extraction and AWS render;
+- Instagram OAuth and real metrics only if social publishing is advertised;
+- rate limiting/abuse protection for public account-link creation;
+- a polished demo merchant, screenshots/video, support email, and custom launch domain;
+- billing only after the free beta proves the flow.
+
+Do not describe a saved Studio project as a generated website or rendered reel. Do not describe generic format recommendations as live trends unless the source and observation date are recorded.

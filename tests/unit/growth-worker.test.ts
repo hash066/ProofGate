@@ -48,6 +48,12 @@ function adminBoundary(): GrowthAdminBoundary {
     saveDecisionPolicy: vi.fn(async () => ({ inserted: true })),
     getDecisionPolicy: vi.fn(async () => null),
     registerSocialCampaign: vi.fn(async () => ({ inserted: true })),
+    createStudioLink: vi.fn(async () => ({ created: true })),
+    claimStudioLink: vi.fn(async () => ({ linked: true })),
+    completeStudioLink: vi.fn(async () => ({ status: "pending" as const })),
+    getStudioSession: vi.fn(async () => null),
+    saveStudioProject: vi.fn(async () => ({ inserted: true })),
+    listStudioProjects: vi.fn(async () => []),
   };
 }
 
@@ -57,15 +63,104 @@ async function hash(value: string): Promise<string> {
 }
 
 describe("growth Worker", () => {
+  it("serves a guided Product Hunt studio for website, reels, or both", async () => {
+    const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
+    const html = await response.text();
+    expect(html).toContain('data-pg="studio"');
+    expect(html).toContain("Build a website");
+    expect(html).toContain("Create reels");
+    expect(html).toContain("I need both");
+    expect(html).toContain("Continue with WhatsApp");
+    expect(html).not.toContain("API key");
+  });
+
+  it("creates a short-lived WhatsApp credential link without exposing a secret", async () => {
+    const admin = adminBoundary();
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/link", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ intent: "both" }),
+    }, { AXCAS_WHATSAPP_NUMBER: "15556537153" } as never);
+    expect(response.status).toBe(201);
+    expect(response.headers.get("set-cookie")).toContain("axcas_link=");
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+    const body = await response.json() as Record<string, unknown>;
+    expect(body.whatsappUrl).toMatch(/^https:\/\/wa\.me\/15556537153\?text=AXCAS%20LINK%20[A-Z0-9]+$/);
+    expect(body).not.toHaveProperty("browserNonce");
+    expect(admin.createStudioLink).toHaveBeenCalledWith(expect.objectContaining({
+      linkId: expect.stringMatching(/^link-/),
+      codeHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      browserNonceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      intent: "both",
+    }), expect.anything());
+  });
+
+  it("binds a signed WhatsApp link message to the authenticated sender", async () => {
+    const admin = adminBoundary();
+    const secret = "meta-secret";
+    const raw = JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ from: "919876543210", id: "wamid.link", type: "text", text: { body: "AXCAS LINK K7M2Q9" } }] } }] }] });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/whatsapp/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-hub-signature-256": await metaSignatureForTest(raw, secret) },
+      body: raw,
+    }, { META_APP_SECRET: secret, META_VERIFY_TOKEN: "verify" });
+    expect(response.status).toBe(200);
+    expect(admin.claimStudioLink).toHaveBeenCalledWith(expect.objectContaining({
+      codeHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      merchantId: expect.stringMatching(/^merchant-/),
+      ownerWaIdHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      providerMessageId: "wamid.link",
+    }), expect.anything());
+  });
+
+  it("exchanges a browser-bound WhatsApp claim for an HttpOnly studio session", async () => {
+    const admin = adminBoundary();
+    (admin.completeStudioLink as ReturnType<typeof vi.fn>).mockResolvedValue({ status: "authenticated", intent: "both", merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64) });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/link/status", {
+      method: "POST",
+      headers: { cookie: "axcas_link=link-123e4567-e89b-12d3-a456-426614174000.ABCDEFGHIJKLMNOPQRSTUVWX" },
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("set-cookie")).toMatch(/^axcas_session=[A-Za-z0-9_-]+;/);
+    expect(response.headers.get("set-cookie")).toContain("Secure; HttpOnly; SameSite=Lax");
+    expect(admin.completeStudioLink).toHaveBeenCalledWith(expect.objectContaining({
+      linkId: "link-123e4567-e89b-12d3-a456-426614174000",
+      browserNonceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      sessionHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    }), expect.anything());
+  });
+
+  it("stores a web project revision only for an authenticated linked merchant", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    const app = createApp(undefined, boundary(), admin);
+    const unauthorized = await app.request("http://proofgate.test/api/studio/projects", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ intent: "website", businessName: "Maya Studio", description: "Tailoring", siteStyle: "minimal", referenceAssetIds: [] }),
+    });
+    expect(unauthorized.status).toBe(401);
+
+    const saved = await app.request("http://proofgate.test/api/studio/projects", {
+      method: "POST", headers: { "content-type": "application/json", cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+      body: JSON.stringify({ intent: "website", businessName: "Maya Studio", description: "Custom tailoring in Bengaluru", siteStyle: "minimal", referenceAssetIds: [] }),
+    });
+    expect(saved.status).toBe(201);
+    expect(admin.saveStudioProject).toHaveBeenCalledWith(expect.objectContaining({
+      merchantId: "merchant-maya", intent: "website", projectId: expect.stringMatching(/^project-/), revisionId: expect.stringMatching(/^revision-/),
+      project: expect.objectContaining({ businessName: "Maya Studio", siteStyle: "minimal" }),
+    }), undefined);
+  });
   it("shows the sellable WhatsApp-first customer journey at the public root", async () => {
     const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
     const html = await response.text();
     expect(html).toContain('data-pg="product-home"');
-    expect(html).toContain("Axcas — WhatsApp business agent");
+    expect(html).toContain("Axcas — websites and reels for small businesses");
     expect(html).toContain("Axcas agent");
-    expect(html).toContain("Send one WhatsApp message");
+    expect(html).toContain("Start in WhatsApp for speed");
     expect(html).toContain('data-pg="start-whatsapp"');
     expect(html).toContain('href="https://wa.me/15556537153?text=START%20AXCAS"');
     expect(html).toContain("Photos + offerings + voice note");
@@ -73,7 +168,8 @@ describe("growth Worker", () => {
     expect(html).toContain("AWS-hosted Hermes is live");
     expect(html).not.toContain("durable Hermes hosting");
     expect(html).toContain("For small businesses");
-    expect(html).toContain("The agent identifies your business type");
+    expect(html).toContain('data-pg="start-studio"');
+    expect(html).toContain('href="/studio"');
     expect(html).toContain("Demo journey — not live merchant proof");
     expect(html).not.toContain("For home bakeries");
     expect(html).not.toContain("Saturday Sessions");
