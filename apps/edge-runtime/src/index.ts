@@ -168,6 +168,7 @@ async function sha256Bytes(value: Uint8Array): Promise<string> {
 }
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024;
+const STUDIO_RESPONSIVE_CSS = "h1{font-size:clamp(2.8rem,7vw,5.5rem);text-wrap:balance}.mode-card{min-width:0}@media(min-width:851px){.three{grid-template-columns:repeat(3,minmax(0,1fr))}}";
 
 function asciiAt(value: Uint8Array, offset: number, expected: string): boolean {
   if (value.byteLength < offset + expected.length) return false;
@@ -528,7 +529,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
   }));
-  app.get("/studio.css", (context) => context.body(renderStudioCss(), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
+  app.get("/studio.css", (context) => context.body(`${renderStudioCss()}${STUDIO_RESPONSIVE_CSS}`, 200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
   app.get("/studio.js", (context) => context.body(renderStudioClientJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
   app.post("/api/studio/link", async (context) => {
     let intent: StudioIntent;

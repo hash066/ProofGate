@@ -106,6 +106,14 @@ describe("growth Worker", () => {
     expect(() => new Script(javascript)).not.toThrow();
   });
 
+  it("keeps the three channel choices inside the desktop viewport", async () => {
+    const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio.css");
+    const css = await response.text();
+    expect(css).toContain("repeat(3,minmax(0,1fr))");
+    expect(css).toContain(".mode-card{min-width:0}");
+    expect(css).toContain("@media(min-width:851px)");
+  });
+
   it("creates a short-lived WhatsApp credential link without exposing a secret", async () => {
     const admin = adminBoundary();
     const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/link", {
