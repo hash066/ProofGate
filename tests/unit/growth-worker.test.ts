@@ -68,7 +68,7 @@ async function hash(value: string): Promise<string> {
 
 describe("growth Worker", () => {
   it("serves a guided Product Hunt studio for website, reels, or both", async () => {
-    const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio");
+    const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio", undefined, { AXCAS_WHATSAPP_NUMBER: "919999888877" } as never);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
     const html = await response.text();
@@ -77,6 +77,13 @@ describe("growth Worker", () => {
     expect(html).toContain("Create reels");
     expect(html).toContain("I need both");
     expect(html).toContain("Continue with WhatsApp");
+    expect(html).toContain("WhatsApp voice agent");
+    expect(html).toContain("Visual Studio");
+    expect(html).toContain("Use both");
+    expect(html).toContain("https://wa.me/919999888877?text=START%20AXCAS");
+    expect(html).toContain('id="modeChooser"');
+    expect(html).toContain('id="studioModeButton"');
+    expect(html).toContain('id="bothModeButton"');
     expect(html).toContain("Order WhatsApp number");
     expect(html).toContain("What do you offer?");
     expect(html).toContain("Build checked preview");
@@ -93,6 +100,9 @@ describe("growth Worker", () => {
     expect(javascript).toContain("/build");
     expect(javascript).toContain("/api/studio/approvals/");
     expect(javascript).toContain("needs_input");
+    expect(javascript).toContain("studioModeButton");
+    expect(javascript).toContain("bothModeButton");
+    expect(javascript).toContain("sessionAuthenticated");
     expect(() => new Script(javascript)).not.toThrow();
   });
 

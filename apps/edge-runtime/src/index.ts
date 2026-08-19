@@ -523,7 +523,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   }));
-  app.get("/studio", (context) => context.html(renderStudio(), 200, {
+  app.get("/studio", (context) => context.html(renderStudio(context.env?.AXCAS_WHATSAPP_NUMBER), 200, {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",

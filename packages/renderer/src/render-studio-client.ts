@@ -1,13 +1,15 @@
 export function renderStudioClientJs(): string {
   return `(()=>{
-const $=(selector)=>document.querySelector(selector);let linkPoll;let activeApproval;let activeReel;
+const $=(selector)=>document.querySelector(selector);let linkPoll;let activeApproval;let activeReel;let sessionAuthenticated=false;
 const selected=(name)=>document.querySelector('input[name="'+name+'"]:checked')?.value;
 const api=(url,options={})=>fetch(url,options);
 function setVisibility(){const intent=selected('intent');$('#siteDetails').classList.toggle('hidden',intent==='reels');$('#reelStyles').classList.toggle('hidden',intent==='website')}
-function showWorkspace(){$('#path').classList.add('hidden');$('#linkPanel').classList.add('hidden');$('#workspace').classList.remove('hidden');setVisibility()}
+function showWorkspace(){$('#modeChooser').classList.add('hidden');$('#path').classList.add('hidden');$('#linkPanel').classList.add('hidden');$('#workspace').classList.remove('hidden');setVisibility()}
+function showOutcome(mode){$('#modeChooser').classList.add('hidden');$('#path').classList.remove('hidden');if(mode==='both'){document.querySelector('input[name="intent"][value="both"]').checked=true}setVisibility();$('#path').scrollIntoView({behavior:'smooth'})}
 document.querySelectorAll('input[name="intent"]').forEach((item)=>item.addEventListener('change',setVisibility));setVisibility();
-api('/api/studio/me',{cache:'no-store'}).then((response)=>{if(response.ok)showWorkspace()}).catch(()=>{});
-$('#linkButton').addEventListener('click',async()=>{const response=await api('/api/studio/link',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({intent:selected('intent')})});if(!response.ok){$('#linkButton').textContent=response.status===429?'Try again in a few minutes.':'Could not start sign-in. Try again.';return}const result=await response.json();$('#path').classList.add('hidden');$('#linkPanel').classList.remove('hidden');$('#whatsappLink').href=result.whatsappUrl;linkPoll=setInterval(checkLink,1800)});
+$('#studioModeButton').addEventListener('click',()=>showOutcome('studio'));$('#bothModeButton').addEventListener('click',()=>showOutcome('both'));
+api('/api/studio/me',{cache:'no-store'}).then((response)=>{if(response.ok){sessionAuthenticated=true;$('#linkButton').textContent='Open the optional Visual Studio'}}).catch(()=>{});
+$('#linkButton').addEventListener('click',async()=>{if(sessionAuthenticated){showWorkspace();return}const response=await api('/api/studio/link',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({intent:selected('intent')})});if(!response.ok){$('#linkButton').textContent=response.status===429?'Try again in a few minutes.':'Could not start sign-in. Try again.';return}const result=await response.json();$('#path').classList.add('hidden');$('#linkPanel').classList.remove('hidden');$('#whatsappLink').href=result.whatsappUrl;linkPoll=setInterval(checkLink,1800)});
 async function checkLink(){const response=await api('/api/studio/link/status',{method:'POST',cache:'no-store'});if(response.status===202)return;if(!response.ok){clearInterval(linkPoll);$('#linkStatus').textContent='This link expired. Refresh to start again.';return}clearInterval(linkPoll);showWorkspace()}
 function offerings(form){const result=[];for(let index=1;index<=3;index++){const name=form['offeringName'+index].value.trim();if(!name)continue;const raw=form['offeringPrice'+index].value;result.push({name,description:form['offeringDescription'+index].value.trim(),currency:form['offeringCurrency'+index].value,...(raw!==''?{priceMinor:Math.round(Number(raw)*100)}:{})})}return result}
 function friendlyMissing(missing){const labels={orderWhatsAppNumber:'order WhatsApp number',fulfillmentArea:'area served',leadTime:'lead time',offerings:'at least one product or service',referenceAssetIds:'at least one real photo'};return missing.map((item)=>labels[item]||item).join(', ')}
