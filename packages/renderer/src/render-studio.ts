@@ -21,7 +21,7 @@ export function renderStudio(): string {
       <label>Your real photos or videos<input id="references" type="file" accept="image/jpeg,image/png,image/webp,video/mp4" multiple></label><button class="primary" type="submit">Build checked preview</button><p id="saveStatus" class="fine" aria-live="polite"></p></form>
       <section id="publishPanel" class="publish hidden" data-pg="publish-checklist"><p class="eyebrow">One final decision</p><h3>Your private preview passed its checks</h3><a id="previewLink" class="secondary" target="_blank" rel="noopener noreferrer">Open private preview</a><pre id="checklist"></pre><label class="confirm"><input id="confirmPublish" type="checkbox"> I reviewed this exact preview and want it live.</label><button id="publishButton" class="primary" type="button">Publish this version</button><p id="publishStatus" class="fine" aria-live="polite"></p></section>
     </section>
-  </main><footer>Axcas provides the workspace, storage, rendering and hosting. You provide the business truth and content rights.</footer><script src="/studio.js" defer></script></body></html>`;
+  </main><footer>Axcas provides the workspace, storage, rendering and hosting. You provide the business truth and content rights.</footer><script src="/studio.js?v=20260819-client-2" defer></script></body></html>`;
 }
 
 export function renderStudioCss(): string {

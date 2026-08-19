@@ -81,6 +81,7 @@ describe("growth Worker", () => {
     expect(html).toContain("What do you offer?");
     expect(html).toContain("Build checked preview");
     expect(html).toContain('data-pg="publish-checklist"');
+    expect(html).toMatch(/<script src="\/studio\.js\?v=[a-z0-9-]+" defer><\/script>/);
     expect(html).not.toContain("API key");
   });
 
