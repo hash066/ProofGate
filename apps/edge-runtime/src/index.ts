@@ -201,6 +201,26 @@ function randomStudioCode(): string {
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
+async function studioLinkRateLimit(headers: Headers, bindings?: Bindings): Promise<{ allowed: true } | { allowed: false; retryAfter: number }> {
+  const address = headers.get("cf-connecting-ip");
+  if (!address || !bindings?.PROOFGATE_CONFIG || !bindings.PROOFGATE_SERVICE_SECRET) return { allowed: true };
+  const windowMs = 10 * 60_000;
+  const now = Date.now();
+  const bucket = Math.floor(now / windowMs);
+  const key = `rl:studio-link:${await sha256(`${bindings.PROOFGATE_SERVICE_SECRET}:${address}:${bucket}`)}`;
+  let count = 0;
+  try {
+    const stored = await bindings.PROOFGATE_CONFIG.get(key);
+    if (stored) count = Number.parseInt(stored, 10) || 0;
+  } catch {
+    return { allowed: true };
+  }
+  const retryAfter = Math.max(1, Math.ceil(((bucket + 1) * windowMs - now) / 1000));
+  if (count >= 5) return { allowed: false, retryAfter };
+  await bindings.PROOFGATE_CONFIG.put(key, String(count + 1), { expirationTtl: Math.max(60, retryAfter + 60) });
+  return { allowed: true };
+}
+
 const liveGrowthBoundary: GrowthBoundary = {
   getPublishedSite: async (slug, bindings) => {
     if (!bindings?.CONVEX_URL) return null;
@@ -489,6 +509,8 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
   app.post("/api/studio/link", async (context) => {
     let intent: StudioIntent;
     try { intent = StudioIntentSchema.parse((await context.req.json() as { intent?: unknown }).intent); } catch { return context.text("Choose website, reels, or both", 400); }
+    const rateLimit = await studioLinkRateLimit(context.req.raw.headers, context.env);
+    if (!rateLimit.allowed) return context.text("Too many sign-in links. Try again shortly.", 429, { "retry-after": String(rateLimit.retryAfter) });
     const linkId = `link-${crypto.randomUUID()}`;
     const code = randomStudioCode();
     const browserNonce = base64UrlEncode(crypto.getRandomValues(new Uint8Array(24)));

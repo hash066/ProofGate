@@ -111,6 +111,28 @@ describe("growth Worker", () => {
     }), expect.anything());
   });
 
+  it("rate-limits repeated public Studio link creation using only a short-lived hashed network key", async () => {
+    const values = new Map<string, string>();
+    const keys: string[] = [];
+    const kv = {
+      get: vi.fn(async (key: string) => values.get(key) ?? null),
+      put: vi.fn(async (key: string, value: string) => { keys.push(key); values.set(key, value); }),
+    };
+    const app = createApp(undefined, boundary(), adminBoundary());
+    for (let index = 0; index < 5; index += 1) {
+      const allowed = await app.request("http://proofgate.test/api/studio/link", {
+        method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.44" }, body: JSON.stringify({ intent: "website" }),
+      }, { PROOFGATE_CONFIG: kv, PROOFGATE_SERVICE_SECRET: "service-secret" } as never);
+      expect(allowed.status).toBe(201);
+    }
+    const limited = await app.request("http://proofgate.test/api/studio/link", {
+      method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.44" }, body: JSON.stringify({ intent: "website" }),
+    }, { PROOFGATE_CONFIG: kv, PROOFGATE_SERVICE_SECRET: "service-secret" } as never);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect(keys.every((key) => !key.includes("203.0.113.44"))).toBe(true);
+  });
+
   it("binds a signed WhatsApp link message to the authenticated sender", async () => {
     const admin = adminBoundary();
     const secret = "meta-secret";

@@ -48,7 +48,7 @@ export function renderProductHome(): string {
       <div class="steps">
         <article class="step"><div class="num">1</div><h3>Choose the outcome</h3><p>Website, reels, or both. Describe the business in WhatsApp or the guided Studio.</p></article>
         <article class="step"><div class="num">2</div><h3>Review one preview</h3><p>The agent builds a constrained business page and independently checks it before asking.</p></article>
-        <article class="step"><div class="num">3</div><h3>Approve in WhatsApp</h3><p>A signed approval publishes exactly the version the merchant reviewed.</p></article>
+        <article class="step"><div class="num">3</div><h3>Approve one checklist</h3><p>The WhatsApp-linked owner publishes exactly the version they reviewed.</p></article>
         <article class="step"><div class="num">4</div><h3>Improve with evidence</h3><p>Views and order-clicks return to WhatsApp. Any page change needs fresh approval.</p></article>
       </div>
     </section>
@@ -69,7 +69,7 @@ export function renderProductHome(): string {
           <div class="check"><strong>Working:</strong> WhatsApp intake, tenant isolation, catalog generation, verification, approvals, tracked CTAs, metrics, reel pipeline.</div>
           <div class="check"><strong>Live foundation:</strong> AWS-hosted Hermes is live and the public Worker forwards through a fail-closed authenticated origin.</div>
           <div class="check"><strong>Controlled beta:</strong> Meta-approved test recipients can complete the WhatsApp flow while production access is completed.</div>
-          <div class="check"><strong>Still gated:</strong> a durable named origin, Meta production access, and consented Vapi call acceptance.</div>
+          <div class="check"><strong>Still gated:</strong> Meta production-number access, one real merchant-media reel, and consented Vapi call acceptance.</div>
         </div>
       </div>
     </section>
