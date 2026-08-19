@@ -39,6 +39,7 @@ npm run proofgate -- lead lead.json
 npm run proofgate -- batch batch.json
 npm run proofgate -- reel reel.json
 npm run proofgate -- deliver-reel REEL_ID ASSET_ID MERCHANT_WA_ID "Your approved reel" --submit
+npm run reel:template:render -- render-request.json
 ```
 
 Commands validate locally by default. Add `--submit` only from the configured Hermes host. `verification` mints a short-lived single-use capability for the isolated verifier; `release` creates—not executes—a merchant approval request. Metrics and approved work are available through `metrics` and `guardian`; the only unauthenticated write is the exact capability-bound verifier evidence route.
@@ -54,6 +55,7 @@ Commands validate locally by default. Add `--submit` only from the configured He
 | `packages/whatsapp-io` | Meta signature parsing, buttons, and template adapter |
 | `packages/calls` | Consent-first Vapi squad, outbound client, authenticated callback |
 | `packages/reels` and `apps/reel-worker` | Polly voiceover and verified FFmpeg render |
+| `apps/reel-template-worker` | Owner-authorized Remotion compositions, private-asset adapter, and 1080×1920 render CLI |
 | `apps/edge-runtime` | Public routes, webhooks, tracked redirects, private admin boundary |
 | `convex/growth.ts` | Durable events, approvals, consent, guardian claims, structured outcomes |
 | `hermes/skills/proofgate` | Hermes operating policy and typed commands |

@@ -9,6 +9,15 @@ Build window: eight hours
 
 ## 2026-08-18 approved Product Hunt scope amendment
 
+### 2026-08-19 owner-authorized motion-template source
+
+The owner explicitly authorized direct use of `gdpranavl/YouLeft_KumarKindaTemplates`.
+Axcas pins source commit `ed8d037f7b35e0cc971521801df07e0edf69828c` and adapts its five
+Remotion compositions behind the validated `ReelStyleProfileV1` boundary. Creator-specific
+sample identity and placeholder B-roll are excluded. Render inputs resolve only to the
+merchant assets selected in the immutable profile; agents still cannot emit or patch runtime
+page or renderer code.
+
 WhatsApp remains the fastest merchant surface, but it is no longer the only surface.
 Axcas also provides a guided customer-facing web Studio that begins with exactly one
 choice: Website, Reels, or Both. Studio access is passwordless and bound to a short-lived

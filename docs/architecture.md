@@ -23,6 +23,8 @@ Approved call batch -> atomic guardian claim -> Vapi consent squad -> qualificat
 
 Approved reel -> atomic guardian claim -> AWS Polly + FFmpeg -> ffprobe -> private storage/WhatsApp
 
+Studio reel profile -> selected immutable merchant assets -> owner-authorized Remotion composition -> H.264/AAC verification -> private storage/WhatsApp. The adapter maps the five constrained Axcas format IDs to code-owned compositions and never accepts arbitrary public URLs or paths outside the approved asset root.
+
 Three reel variants -> one immutable social-campaign hash -> one merchant approval
                    -> Instagram publishing remains disabled until provider readiness
                    -> 2h/24h/72h normalized metrics -> winner or insufficient signal

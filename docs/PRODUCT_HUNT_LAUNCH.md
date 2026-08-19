@@ -25,11 +25,11 @@ Provider-heavy calls, paid Meta conversations, ad spend, and additional renders 
 
 ## Honest readiness
 
-The original WhatsApp MVP is about 96% implemented. Against the expanded Product Hunt scope, code readiness is about 74% before the first Studio production deployment. The remaining public-launch gates are:
+The original WhatsApp MVP is about 96% implemented. Against the expanded Product Hunt scope, code readiness is about 80%. Studio is deployed, and all five owner-authorized motion compositions now have a typed private-asset adapter and a verified 15-second local render. The remaining public-launch gates are:
 
 - production Meta number and one real general-user run;
 - web project → generated candidate → verifier → checklist approval → publish handoff;
-- one real reference-reel style extraction and AWS render;
+- install the current exact commit on AWS and render one real merchant-approved reference profile;
 - Instagram OAuth and real metrics only if social publishing is advertised;
 - rate limiting/abuse protection for public account-link creation;
 - a polished demo merchant, screenshots/video, support email, and custom launch domain;

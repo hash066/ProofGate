@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   const issuedAt = Date.now();
   const runId = `spike-b-${new Date(issuedAt).toISOString().replace(/[-:.TZ]/g, "")}-${randomUUID().slice(0, 8)}`;
   const recipientIdentityHash = hash(telegramChatIdFromTarget(target));
-  const nonce = randomBytes(24).toString("base64url");
+  const nonce = Buffer.from(randomBytes(24)).toString("base64url");
   const nonceHash = hash(nonce);
   const session: BookingSession = {
     schemaVersion: 1,

@@ -7,11 +7,16 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "nanoid": "3.3.18",
+    "postcss": "8.5.26"
+  },
   "scripts": {
     "demo": "tsx scripts/demo-loop.mjs",
     "intake": "tsx scripts/intake.mjs",
     "proofgate": "tsx apps/proofgate-cli/src/index.ts",
     "reel:render": "tsx scripts/render-reel.mjs",
+    "reel:template:render": "npm run render --workspace=@axcas/reel-template-worker --",
     "acceptance:preflight": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/acceptance-preflight.mjs",
     "aws:deploy": "powershell -NoProfile -ExecutionPolicy Bypass -File infra/aws/deploy.ps1",
     "start": "node src/server.js",
@@ -22,7 +27,7 @@
     "test:legacy": "node --test tests/integration/server.test.js tests/unit/booking.test.js",
     "test:unit": "vitest run --exclude='tests/**/*.test.js'",
     "test": "npm run test:legacy && npm run test:unit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && npm run typecheck --workspace=@axcas/reel-template-worker"
   },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.1104.0",
@@ -33,13 +38,13 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260712.1",
+    "@cloudflare/workers-types": "5.20260815.1",
     "@playwright/test": "^1.57.0",
     "@types/node": "^26.1.1",
     "jsdom": "^29.1.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16",
-    "wrangler": "^4.58.0"
+    "wrangler": "^4.124.0"
   }
 }
