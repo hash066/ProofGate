@@ -86,6 +86,7 @@ describe("growth Worker", () => {
 
   it("wires Studio uploads into a saved revision, checked preview, and one publish action", async () => {
     const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio.js");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     const javascript = await response.text();
     expect(javascript).toContain("referenceAssetIds:assetIds");
     expect(javascript).toContain("/build");

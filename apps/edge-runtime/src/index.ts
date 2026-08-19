@@ -529,7 +529,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
   }));
   app.get("/studio.css", (context) => context.body(renderStudioCss(), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
-  app.get("/studio.js", (context) => context.body(renderStudioClientJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
+  app.get("/studio.js", (context) => context.body(renderStudioClientJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
   app.post("/api/studio/link", async (context) => {
     let intent: StudioIntent;
     try { intent = StudioIntentSchema.parse((await context.req.json() as { intent?: unknown }).intent); } catch { return context.text("Choose website, reels, or both", 400); }
