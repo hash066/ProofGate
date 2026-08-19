@@ -1,4 +1,4 @@
-import { BusinessBriefSchema, SiteSpecV2Schema, type BusinessBriefV1, type BusinessType, type SiteSpecV2 } from "./growth";
+import { BusinessBriefSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type BusinessType, type ReelPlanV1, type SiteSpecV2 } from "./growth";
 import { StudioProjectInputSchema, type StudioProjectInput } from "./studio";
 
 export type StudioOwnerIdentity = { merchantId: string; ownerWaIdHash: string };
@@ -122,4 +122,38 @@ export function buildStudioWebsite(input: unknown, owner: StudioOwnerIdentity): 
     proofBadge: { enabled: true, passportSlug: siteId },
   });
   return { brief, spec };
+}
+
+const reelAngleByTemplate = {
+  kinetic_type: "Offer + urgency",
+  split_explainer: "Process + proof",
+  talking_half: "Founder + evidence",
+  full_infographic: "Useful breakdown",
+  post_highlight: "Question + answer",
+} as const;
+
+export function buildStudioReelPlan(input: unknown, owner: StudioOwnerIdentity): { plan: ReelPlanV1; suggestions: string[] } {
+  const project = StudioProjectInputSchema.parse(input);
+  if (project.intent === "website") throw new Error("website-only projects do not contain a reel");
+  if (!project.projectId || !project.reelTemplate || !project.layerOverrides) throw new Error("reel format and editable layers are required");
+  const assets = project.siteAssetIds.length ? project.siteAssetIds : project.referenceAssetIds;
+  if (!assets.length) throw new MissingStudioFactsError(["referenceAssetIds"]);
+  const overlays = [project.layerOverrides.hook, project.layerOverrides.proof, project.layerOverrides.cta];
+  const angle = reelAngleByTemplate[project.reelTemplate];
+  const suggestions = [angle, "Behind the scenes", "Customer question answered"];
+  const reelId = `reel-${slugify(project.projectId, "studio-project")}`.slice(0, 64).replace(/-+$/g, "");
+  const plan = ReelPlanSchema.parse({
+    schemaVersion: 1,
+    reelId,
+    merchantId: owner.merchantId,
+    angle,
+    hook: project.layerOverrides.hook,
+    scenes: overlays.map((overlay, index) => ({ assetId: assets[index % assets.length]!, overlay, durationMs: 5_000 })),
+    voiceover: `${project.layerOverrides.hook}. ${project.layerOverrides.proof}. ${project.layerOverrides.cta}.`,
+    caption: `${project.layerOverrides.proof}. ${project.layerOverrides.cta}.`,
+    cta: project.layerOverrides.cta,
+    claims: project.suppliedClaims,
+    status: "draft",
+  });
+  return { plan, suggestions };
 }

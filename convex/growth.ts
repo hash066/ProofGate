@@ -446,10 +446,11 @@ export const resolveStudioApprovalInternal = internalMutation({
   },
   handler: async (context, args) => {
     const approval = await context.db.query("approvals").withIndex("by_approval_id", (range) => range.eq("approvalId", args.approvalId)).unique();
-    if (!approval || approval.type !== "release" || approval.decision !== "pending" || approval.expiresAt < args.now) return { accepted: false };
+    if (!approval || (approval.type !== "release" && approval.type !== "reel") || approval.decision !== "pending" || approval.expiresAt < args.now) return { accepted: false as const };
     if (approval.merchantId !== args.merchantId || approval.ownerWaIdHash !== args.ownerWaIdHash) return { accepted: false };
     await context.db.patch(approval._id, { decision: args.decision, decidedAt: args.now, providerMessageId: args.providerMessageId });
-    return { accepted: true };
+    const reel = approval.type === "reel" ? (await context.db.query("reelPlans").collect()).find((entry) => entry.approvalId === approval.approvalId) : undefined;
+    return { accepted: true as const, type: approval.type, reelId: reel?.reelId };
   },
 });
 
@@ -458,7 +459,7 @@ export const adminResolveStudioApproval = action({
     serviceSecret: v.string(), approvalId: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(),
     decision: v.union(v.literal("approved"), v.literal("denied")), providerMessageId: v.string(), now: v.number(),
   },
-  handler: async (context, args): Promise<{ accepted: boolean }> => {
+  handler: async (context, args): Promise<{ accepted: boolean; type?: "release" | "reel"; reelId?: string }> => {
     requireServiceSecret(args.serviceSecret);
     const { serviceSecret: _secret, ...record } = args;
     return context.runMutation(internal.growth.resolveStudioApprovalInternal, record);
@@ -578,11 +579,11 @@ export const adminPrepareAssetUpload = mutation({
 });
 
 export const adminGetAssetForDelivery = query({
-  args: { serviceSecret: v.string(), assetId: v.string() },
+  args: { serviceSecret: v.string(), assetId: v.string(), merchantId: v.optional(v.string()) },
   handler: async (context, args) => {
     requireServiceSecret(args.serviceSecret);
     const asset = await context.db.query("mediaAssets").withIndex("by_asset_id", (range) => range.eq("assetId", args.assetId)).unique();
-    if (!asset) return null;
+    if (!asset || (args.merchantId && asset.merchantId !== args.merchantId)) return null;
     const storageBackend = asset.storageBackend ?? "r2";
     const storageUrl = storageBackend === "convex" && asset.convexStorageId ? await context.storage.getUrl(asset.convexStorageId) : undefined;
     return { storageBackend, objectKey: asset.objectKey, storageUrl: storageUrl ?? undefined, contentType: asset.contentType, sha256: asset.sha256 };
@@ -755,5 +756,15 @@ export const adminCompleteReel = action({
     requireServiceSecret(args.serviceSecret);
     const { serviceSecret: _secret, ...record } = args;
     return context.runMutation(internal.growth.completeReelInternal, record);
+  },
+});
+
+export const adminGetReelStatus = query({
+  args: { serviceSecret: v.string(), reelId: v.string(), merchantId: v.string() },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const reel = await context.db.query("reelPlans").withIndex("by_reel_id", (range) => range.eq("reelId", args.reelId)).unique();
+    if (!reel || reel.merchantId !== args.merchantId) return null;
+    return { status: reel.status, renderedAssetId: reel.renderedAssetId };
   },
 });

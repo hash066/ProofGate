@@ -1,0 +1,23 @@
+[Unit]
+Description=Axcas approved private reel renderer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proofgate
+Group=proofgate
+WorkingDirectory=/opt/proofgate/ProofGate
+Environment=NODE_ENV=production
+Environment=AWS_REGION=ap-south-1
+EnvironmentFile=/etc/proofgate/hermes.env
+ExecStart=/usr/bin/npm run start --workspace @axcas/reel-guardian
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

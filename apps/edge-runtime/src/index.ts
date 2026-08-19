@@ -5,12 +5,13 @@ import { api } from "../../../convex/_generated/api";
 import { initialSpikeSiteSpec, SiteSpecSchema } from "../../../packages/domain/src/site-spec";
 import { BusinessBriefInputSchema, BusinessBriefSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type LeadConsentV1, type ReelPlanV1, type SiteSpecV2 } from "../../../packages/domain/src/growth";
 import { StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
-import { buildStudioWebsite, MissingStudioFactsError } from "../../../packages/domain/src/studio-builder";
+import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError } from "../../../packages/domain/src/studio-builder";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
 import { renderBusinessSite } from "../../../packages/renderer/src/render-bakery-site";
 import { renderProductHome } from "../../../packages/renderer/src/render-product-home";
-import { renderStudio, renderStudioCss, renderStudioJs } from "../../../packages/renderer/src/render-studio";
+import { renderStudio, renderStudioCss } from "../../../packages/renderer/src/render-studio";
+import { renderStudioClientJs } from "../../../packages/renderer/src/render-studio-client";
 import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from "../../../packages/renderer/src/render-legal";
 import { renderSite } from "../../../packages/renderer/src/render-site";
 import { authenticateVapiWebhook } from "../../../packages/calls/src/vapi";
@@ -86,7 +87,7 @@ export type GrowthAdminBoundary = {
   getPreviewSite: (siteId: string, versionId: string, specHash: string, bindings?: Bindings) => Promise<{ spec: SiteSpecV2; versionId: string; specHash: string } | null>;
   registerLead: (merchantId: string, consent: LeadConsentV1, bindings?: Bindings) => Promise<unknown>;
   createApproval: (input: { approvalId: string; merchantId: string; type: "release" | "call_batch" | "reel" | "social_campaign"; scopeHash: string; expiresAt: number }, bindings?: Bindings) => Promise<unknown>;
-  resolveStudioApproval: (input: { approvalId: string; merchantId: string; ownerWaIdHash: string; decision: "approved" | "denied"; providerMessageId: string }, bindings?: Bindings) => Promise<{ accepted: boolean }>;
+  resolveStudioApproval: (input: { approvalId: string; merchantId: string; ownerWaIdHash: string; decision: "approved" | "denied"; providerMessageId: string }, bindings?: Bindings) => Promise<{ accepted: boolean; type?: "release" | "reel"; reelId?: string }>;
   attachApprovalMessage: (approvalId: string, providerMessageId: string, bindings?: Bindings) => Promise<unknown>;
   createCallBatch: (batch: CallBatch, approvalId: string, bindings?: Bindings) => Promise<unknown>;
   registerReel: (plan: ReelPlanV1, planHash: string, approvalId: string, bindings?: Bindings) => Promise<unknown>;
@@ -94,10 +95,12 @@ export type GrowthAdminBoundary = {
   registerAsset: (input: { assetId: string; merchantId: string; storageBackend: "r2" | "convex"; objectKey?: string; convexStorageId?: string; sha256: string; contentType: string; byteLength: number; sourceProviderMessageId: string }, bindings?: Bindings) => Promise<unknown>;
   uploadAsset: (input: { assetId: string; merchantId: string; sha256: string; contentType: string; byteLength: number; sourceProviderMessageId: string; body: Uint8Array }, bindings?: Bindings) => Promise<{ inserted: boolean; storageBackend: "convex" }>;
   getPrivateAsset: (assetId: string, bindings?: Bindings) => Promise<{ body: Uint8Array; contentType: string; etag: string } | null>;
+  getPrivateAssetForMerchant: (assetId: string, merchantId: string, bindings?: Bindings) => Promise<{ body: Uint8Array; contentType: string; etag: string } | null>;
   metrics: (siteId: string, merchantId: string, since: number, bindings?: Bindings) => Promise<unknown>;
   claimCallBatch: (bindings?: Bindings) => Promise<null | { batchId: string; earliestAt: number; leads: Array<{ leadId: string; phoneCiphertext: string }> }>;
   claimReel: (bindings?: Bindings) => Promise<null | { reelId: string; planJson: string; planHash: string }>;
   completeReel: (reelId: string, status: "rendered" | "failed", renderedAssetId: string | undefined, deliveredProviderMessageId?: string, bindings?: Bindings) => Promise<unknown>;
+  getReelStatus: (reelId: string, merchantId: string, bindings?: Bindings) => Promise<{ status: "draft" | "rendering" | "rendered" | "failed"; renderedAssetId?: string } | null>;
   mintVerification: (input: { tokenHash: string; merchantId: string; siteId: string; versionId: string; specHash: string; expiresAt: number }, bindings?: Bindings) => Promise<unknown>;
   createReleaseRequest: (input: { requestId: string; siteId: string; merchantId: string; versionId: string; specHash: string; scopeHash: string; approvalId: string }, bindings?: Bindings) => Promise<unknown>;
   promoteRelease: (bindings?: Bindings) => Promise<unknown>;
@@ -356,10 +359,31 @@ const liveAdminBoundary: GrowthAdminBoundary = {
     if (await sha256Bytes(body) !== selected.sha256) throw new Error("asset integrity check failed");
     return { body, contentType: selected.contentType, etag: selected.sha256 };
   },
+  getPrivateAssetForMerchant: async (assetId, merchantId, bindings) => {
+    const selected = await adminClient(bindings).query((api as any).growth.adminGetAssetForDelivery, {
+      serviceSecret: serviceSecret(bindings), assetId, merchantId,
+    }) as null | { storageBackend: "r2" | "convex"; objectKey?: string; storageUrl?: string; contentType: string; sha256: string };
+    if (!selected) return null;
+    if (selected.storageBackend === "r2") {
+      if (!bindings?.PROOFGATE_ASSETS || !selected.objectKey) return null;
+      const object = await bindings.PROOFGATE_ASSETS.get(selected.objectKey);
+      if (!object) return null;
+      const body = new Uint8Array(await object.arrayBuffer());
+      if (await sha256Bytes(body) !== selected.sha256) throw new Error("asset integrity check failed");
+      return { body, contentType: selected.contentType, etag: selected.sha256 };
+    }
+    if (!selected.storageUrl) return null;
+    const response = await fetch(selected.storageUrl);
+    if (!response.ok) return null;
+    const body = new Uint8Array(await response.arrayBuffer());
+    if (await sha256Bytes(body) !== selected.sha256) throw new Error("asset integrity check failed");
+    return { body, contentType: selected.contentType, etag: selected.sha256 };
+  },
   metrics: (siteId, merchantId, since, bindings) => adminClient(bindings).query((api as any).growth.metricsSummary, { serviceSecret: serviceSecret(bindings), siteId, merchantId, since }),
   claimCallBatch: (bindings) => adminClient(bindings).action((api as any).growth.adminClaimApprovedCallBatch, { serviceSecret: serviceSecret(bindings), now: Date.now() }),
   claimReel: (bindings) => adminClient(bindings).action((api as any).growth.adminClaimApprovedReel, { serviceSecret: serviceSecret(bindings), now: Date.now() }),
   completeReel: (reelId, status, renderedAssetId, deliveredProviderMessageId, bindings) => adminClient(bindings).action((api as any).growth.adminCompleteReel, { serviceSecret: serviceSecret(bindings), reelId, status, renderedAssetId, deliveredProviderMessageId }),
+  getReelStatus: (reelId, merchantId, bindings) => adminClient(bindings).query((api as any).growth.adminGetReelStatus, { serviceSecret: serviceSecret(bindings), reelId, merchantId }),
   mintVerification: (input, bindings) => adminClient(bindings).action((api as any).growth.adminMintVerificationCapability, { serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now() }),
   createReleaseRequest: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateGrowthReleaseRequest, { serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now() }),
   promoteRelease: (bindings) => adminClient(bindings).action((api as any).growth.adminPromoteApprovedGrowthRelease, { serviceSecret: serviceSecret(bindings), now: Date.now() }),
@@ -505,7 +529,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
   }));
   app.get("/studio.css", (context) => context.body(renderStudioCss(), 200, { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
-  app.get("/studio.js", (context) => context.body(renderStudioJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
+  app.get("/studio.js", (context) => context.body(renderStudioClientJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600", "x-content-type-options": "nosniff" }));
   app.post("/api/studio/link", async (context) => {
     let intent: StudioIntent;
     try { intent = StudioIntentSchema.parse((await context.req.json() as { intent?: unknown }).intent); } catch { return context.text("Choose website, reels, or both", 400); }
@@ -625,6 +649,26 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       },
     }, 201, { "cache-control": "no-store" });
   });
+  app.post("/api/studio/projects/:projectId/reel", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const stored = (await adminBoundary.listStudioProjects(session.merchantId, context.env)).find((entry) => entry.projectId === context.req.param("projectId"));
+    if (!stored) return context.text("Project not found", 404);
+    let built: ReturnType<typeof buildStudioReelPlan>;
+    try { built = buildStudioReelPlan(stored.project, { merchantId: session.merchantId, ownerWaIdHash: session.ownerWaIdHash }); }
+    catch (error) {
+      if (error instanceof MissingStudioFactsError) return context.json({ stage: "needs_input", missing: error.missing }, 409);
+      return context.text("Reel project is incomplete", 409);
+    }
+    const planHash = await sha256(canonicalize(built.plan));
+    const approvalId = `approval-${crypto.randomUUID()}`;
+    await adminBoundary.registerReel(built.plan, planHash, approvalId, context.env);
+    await adminBoundary.createApproval({ approvalId, merchantId: session.merchantId, type: "reel", scopeHash: planHash, expiresAt: Date.now() + 86_400_000 }, context.env);
+    return context.json({
+      stage: "approval_required", reelId: built.plan.reelId, suggestions: built.suggestions,
+      approval: { approvalId, checklist: formatApprovalChecklist({ type: "reel", subject: built.plan.angle, details: ["Uses only your selected photos", "15-second vertical render", "Your supplied hook, proof, CTA, and claims", "Returned privately; not posted" ] }) },
+    }, 201, { "cache-control": "no-store" });
+  });
   app.post("/api/studio/approvals/:approvalId", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
     if (!session) return context.text("Unauthorized", 401);
@@ -642,9 +686,30 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     }, context.env);
     if (!resolved.accepted) return context.text("Approval is invalid, expired, or already used", 409);
     if (decision === "denied") return context.json({ stage: "declined" }, 200, { "cache-control": "no-store" });
+    if (resolved.type === "reel" && resolved.reelId) return context.json({ stage: "rendering", reelId: resolved.reelId }, 202, { "cache-control": "no-store" });
     const promoted = await adminBoundary.promoteRelease(context.env) as { promoted?: boolean; siteId?: string; versionId?: string };
     if (!promoted.promoted || !promoted.siteId) return context.json({ stage: "publication_pending" }, 202, { "cache-control": "no-store" });
     return context.json({ stage: "published", siteId: promoted.siteId, versionId: promoted.versionId, siteUrl: `${new URL(context.req.url).origin}/s/${promoted.siteId}` }, 200, { "cache-control": "no-store" });
+  });
+  app.get("/api/studio/reels/:reelId", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const reelId = context.req.param("reelId");
+    if (!/^[a-z0-9-]{3,64}$/.test(reelId)) return context.text("Invalid reel", 400);
+    const reel = await adminBoundary.getReelStatus(reelId, session.merchantId, context.env);
+    if (!reel) return context.notFound();
+    return context.json({ status: reel.status, ...(reel.status === "rendered" ? { mediaUrl: `/api/studio/reels/${reelId}/media` } : {}) }, 200, { "cache-control": "no-store" });
+  });
+  app.get("/api/studio/reels/:reelId/media", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const reelId = context.req.param("reelId");
+    if (!/^[a-z0-9-]{3,64}$/.test(reelId)) return context.text("Invalid reel", 400);
+    const reel = await adminBoundary.getReelStatus(reelId, session.merchantId, context.env);
+    if (!reel?.renderedAssetId || reel.status !== "rendered") return context.notFound();
+    const media = await adminBoundary.getPrivateAsset(reel.renderedAssetId, context.env);
+    if (!media || media.contentType !== "video/mp4") return context.notFound();
+    return new Response(media.body as BodyInit, { headers: { "content-type": "video/mp4", "cache-control": "private, no-store", "content-disposition": `attachment; filename="${reelId}.mp4"`, "x-content-type-options": "nosniff" } });
   });
   app.put("/api/studio/assets/:localAssetId", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
@@ -1003,6 +1068,28 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     await context.env.PROOFGATE_ASSETS.put(objectKey, body, { httpMetadata: { contentType }, customMetadata: { sha256: digest, merchantId } });
     const result = await adminBoundary.registerAsset({ assetId, merchantId, storageBackend: "r2", objectKey, sha256: digest, contentType, byteLength: body.byteLength, sourceProviderMessageId }, context.env);
     return context.json({ accepted: true, localAssetId, assetId, sha256: digest, storageBackend: "r2", result }, 201);
+  });
+  app.get("/internal/render-assets/:assetId", async (context) => {
+    if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
+    const assetId = context.req.param("assetId");
+    const merchantId = context.req.header("x-proofgate-merchant-id");
+    if (!/^[a-zA-Z0-9_-]{3,128}$/.test(assetId) || !merchantId || !/^[a-z0-9-]{3,64}$/.test(merchantId)) return context.text("Invalid asset scope", 400);
+    const asset = await adminBoundary.getPrivateAssetForMerchant(assetId, merchantId, context.env);
+    if (!asset || !asset.contentType.startsWith("image/")) return context.notFound();
+    return new Response(asset.body as BodyInit, { headers: { "content-type": asset.contentType, etag: asset.etag, "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+  });
+  app.put("/internal/rendered-assets/:localAssetId", async (context) => {
+    if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
+    const localAssetId = context.req.param("localAssetId");
+    const merchantId = context.req.header("x-proofgate-merchant-id");
+    const sourceProviderMessageId = context.req.header("x-proofgate-source-message-id");
+    if (!/^[a-zA-Z0-9_-]{3,100}$/.test(localAssetId) || !merchantId || !/^[a-z0-9-]{3,64}$/.test(merchantId) || !sourceProviderMessageId) return context.text("Invalid rendered asset scope", 400);
+    const body = new Uint8Array(await context.req.arrayBuffer());
+    if (body.byteLength === 0 || body.byteLength > MAX_ASSET_BYTES) return context.text("Asset size is invalid", 413);
+    if (!hasValidAssetSignature("video/mp4", body)) return context.text("Rendered asset must be an MP4", 415);
+    const assetId = `rendered-${merchantId.slice(-12)}-${localAssetId}`;
+    const result = await adminBoundary.uploadAsset({ assetId, merchantId, sha256: await sha256Bytes(body), contentType: "video/mp4", byteLength: body.byteLength, sourceProviderMessageId, body }, context.env);
+    return context.json({ accepted: true, assetId, storageBackend: result.storageBackend }, 201);
   });
   app.post("/internal/guardian", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);

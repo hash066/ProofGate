@@ -28,7 +28,7 @@ function adminBoundary(): GrowthAdminBoundary {
       : null),
     registerLead: vi.fn(async () => ({ inserted: true })),
     createApproval: vi.fn(async () => ({ inserted: true })),
-    resolveStudioApproval: vi.fn(async () => ({ accepted: true })),
+    resolveStudioApproval: vi.fn(async () => ({ accepted: true, type: "release" as const })),
     attachApprovalMessage: vi.fn(async () => ({ attached: true })),
     createCallBatch: vi.fn(async () => ({ inserted: true })),
     registerReel: vi.fn(async () => ({ inserted: true })),
@@ -39,10 +39,12 @@ function adminBoundary(): GrowthAdminBoundary {
       : assetId === "cake-1"
         ? { body: new Uint8Array([0xff, 0xd8, 0xff]), contentType: "image/jpeg", etag: "preview-etag" }
         : null),
+    getPrivateAssetForMerchant: vi.fn(async (assetId: string) => assetId === "cake-1" ? { body: new Uint8Array([0xff, 0xd8, 0xff]), contentType: "image/jpeg", etag: "preview-etag" } : null),
     metrics: vi.fn(async () => ({ views: 10, clicks: 2, clickThroughRate: 0.2 })),
     claimCallBatch: vi.fn(async () => null),
     claimReel: vi.fn(async () => null),
     completeReel: vi.fn(async () => ({ completed: true })),
+    getReelStatus: vi.fn(async () => null),
     mintVerification: vi.fn(async () => ({ created: true })),
     createReleaseRequest: vi.fn(async () => ({ verificationRunId: "verify-1" })),
     promoteRelease: vi.fn(async () => ({ promoted: false })),
@@ -244,7 +246,7 @@ describe("growth Worker", () => {
 
   it("publishes only after the WhatsApp-linked Studio owner accepts the single checklist", async () => {
     const admin = adminBoundary() as GrowthAdminBoundary & { resolveStudioApproval: ReturnType<typeof vi.fn> };
-    admin.resolveStudioApproval = vi.fn(async () => ({ accepted: true }));
+    admin.resolveStudioApproval = vi.fn(async () => ({ accepted: true, type: "release" as const }));
     (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
     (admin.promoteRelease as ReturnType<typeof vi.fn>).mockResolvedValue({ promoted: true, siteId: "maya-studio-abcdef", versionId: "site-revision-1" });
     const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/approvals/approval-12345678", {
@@ -257,6 +259,51 @@ describe("growth Worker", () => {
       approvalId: "approval-12345678", merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), decision: "approved",
     }), undefined);
     expect(admin.promoteRelease).toHaveBeenCalledOnce();
+  });
+
+  it("creates one Studio reel approval from the selected human-led format and supplied photos", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioProjects as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      projectId: "project-reel-1", revisionId: "revision-reel-1", intent: "reels", createdAt: Date.now(),
+      project: { projectId: "project-reel-1", intent: "reels", businessName: "Maya Studio", description: "Custom tailoring", referenceAssetIds: ["asset-photo-1"], siteAssetIds: ["asset-photo-1"], suppliedClaims: ["Custom stitching"], reelTemplate: "split_explainer", layerOverrides: { hook: "See the fit change", proof: "Measured and stitched locally", cta: "Message for an appointment", accent: "#fe5b3a", pacing: "fast" } },
+    }]);
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/projects/project-reel-1/reel", {
+      method: "POST", headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+    });
+    expect(response.status).toBe(201);
+    const result = await response.json() as any;
+    expect(result).toMatchObject({ stage: "approval_required", reelId: expect.stringMatching(/^reel-/), suggestions: ["Process + proof", "Behind the scenes", "Customer question answered"] });
+    expect(result.approval.checklist).toContain("not posted");
+    expect(admin.registerReel).toHaveBeenCalledWith(expect.objectContaining({ status: "draft", scenes: expect.any(Array) }), expect.stringMatching(/^[a-f0-9]{64}$/), expect.stringMatching(/^approval-/), undefined);
+    expect(admin.createApproval).toHaveBeenCalledWith(expect.objectContaining({ type: "reel" }), undefined);
+  });
+
+  it("queues an approved Studio reel without invoking website promotion", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.resolveStudioApproval as ReturnType<typeof vi.fn>).mockResolvedValue({ accepted: true, type: "reel", reelId: "reel-project-reel-1" });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/approvals/approval-reel-123", {
+      method: "POST", headers: { "content-type": "application/json", cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" }, body: JSON.stringify({ decision: "approved" }),
+    });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ stage: "rendering", reelId: "reel-project-reel-1" });
+    expect(admin.promoteRelease).not.toHaveBeenCalled();
+  });
+
+  it("returns and privately serves only the linked merchant's completed Studio reel", async () => {
+    const admin = adminBoundary() as GrowthAdminBoundary & { getReelStatus: ReturnType<typeof vi.fn> };
+    admin.getReelStatus = vi.fn(async () => ({ status: "rendered" as const, renderedAssetId: "reel-output-1" }));
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    const app = createApp(undefined, boundary(), admin);
+    const status = await app.request("http://proofgate.test/api/studio/reels/reel-project-reel-1", { headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" } });
+    expect(status.status).toBe(200);
+    expect(await status.json()).toEqual({ status: "rendered", mediaUrl: "/api/studio/reels/reel-project-reel-1/media" });
+    const media = await app.request("http://proofgate.test/api/studio/reels/reel-project-reel-1/media", { headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" } });
+    expect(media.status).toBe(200);
+    expect(media.headers.get("content-type")).toBe("video/mp4");
+    expect(media.headers.get("cache-control")).toBe("private, no-store");
+    expect(admin.getReelStatus).toHaveBeenCalledWith("reel-project-reel-1", "merchant-1234567890abcdef", undefined);
   });
   it("shows the sellable WhatsApp-first customer journey at the public root", async () => {
     const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/");

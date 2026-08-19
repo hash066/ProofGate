@@ -68,10 +68,12 @@ install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-orig
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared.service /etc/systemd/system/proofgate-cloudflared.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-cloudflared-quick.service /etc/systemd/system/proofgate-cloudflared-quick.service
 install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/proofgate-hermes-relay.service /etc/systemd/system/proofgate-hermes-relay.service
+install -m 0644 /opt/proofgate/ProofGate/infra/aws/systemd/axcas-reel-guardian.service /etc/systemd/system/axcas-reel-guardian.service
 systemctl daemon-reload
 systemctl enable proofgate-hermes-gateway.service
 systemctl enable proofgate-hermes-origin.service
 systemctl enable proofgate-cloudflared.service
 systemctl enable proofgate-hermes-relay.service
+systemctl enable axcas-reel-guardian.service
 
 echo "Runtime installed. Add the operator secrets, configure Hermes and the named-tunnel route, then start services."

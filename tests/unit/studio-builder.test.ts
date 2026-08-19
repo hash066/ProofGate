@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildStudioWebsite, MissingStudioFactsError } from "../../packages/domain/src/studio-builder";
+import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError } from "../../packages/domain/src/studio-builder";
 
 const owner = {
   merchantId: "merchant-1234567890abcdef",
@@ -68,5 +68,20 @@ describe("Studio website builder", () => {
         "referenceAssetIds",
       ]);
     }
+  });
+
+  it("creates one approval-bound 15-second reel plan from supplied layers and photos", () => {
+    const result = buildStudioReelPlan({
+      projectId: "project-tailor-1", intent: "reels", businessName: "Maya Studio",
+      description: "Custom blouse stitching in Bengaluru", reelTemplate: "split_explainer",
+      referenceAssetIds: ["merchant-photo-one", "merchant-photo-two"], siteAssetIds: ["merchant-photo-one", "merchant-photo-two"],
+      suppliedClaims: ["Custom stitching"],
+      layerOverrides: { hook: "See the fit change", proof: "Measured and stitched locally", cta: "Message for an appointment", accent: "#fe5b3a", pacing: "fast" },
+    }, owner);
+    expect(result.plan).toMatchObject({ merchantId: owner.merchantId, angle: "Process + proof", hook: "See the fit change", status: "draft" });
+    expect(result.plan.scenes).toHaveLength(3);
+    expect(result.plan.scenes.reduce((sum, scene) => sum + scene.durationMs, 0)).toBe(15_000);
+    expect(new Set(result.plan.scenes.map((scene) => scene.assetId))).toEqual(new Set(["merchant-photo-one", "merchant-photo-two"]));
+    expect(result.suggestions).toHaveLength(3);
   });
 });
