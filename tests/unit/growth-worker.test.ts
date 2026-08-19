@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Script } from "node:vm";
 
 import { createApp, type GrowthAdminBoundary, type GrowthBoundary, type StudioVerifierBoundary } from "../../apps/edge-runtime/src/index";
 import { initialBakerySiteSpec } from "../../packages/domain/src/growth";
@@ -90,6 +91,7 @@ describe("growth Worker", () => {
     expect(javascript).toContain("/build");
     expect(javascript).toContain("/api/studio/approvals/");
     expect(javascript).toContain("needs_input");
+    expect(() => new Script(javascript)).not.toThrow();
   });
 
   it("creates a short-lived WhatsApp credential link without exposing a secret", async () => {

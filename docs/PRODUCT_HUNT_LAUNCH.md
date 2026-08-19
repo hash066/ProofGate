@@ -25,12 +25,13 @@ Provider-heavy calls, paid Meta conversations, ad spend, and additional renders 
 
 ## Honest readiness
 
-The original WhatsApp MVP is about 96% implemented. Against the expanded Product Hunt scope, readiness is about 89%. Studio website projects now create a validated candidate, pass through a separate no-credential verifier, and publish only after one owner checklist. Public link creation is rate-limited using short-lived hashed keys. All five owner-authorized motion compositions have a typed private-asset adapter, and the deployed AWS renderer has produced a verified 15-second render. The remaining public-launch gates are:
+The Product Hunt beta is about **96% complete**. Studio website projects create a validated candidate, pass through a separate no-credential verifier, and publish only after one owner checklist. Public link creation is rate-limited using short-lived hashed keys. Approved Studio reels now queue to the AWS guardian, render from merchant-scoped private assets, pass ffprobe checks, and return through a private download route. The remaining acceptance gates are:
 
-- production Meta number and one real general-user run;
-- render one real merchant-approved reference profile and return it privately on WhatsApp;
-- Instagram OAuth and real metrics only if social publishing is advertised;
-- a polished demo merchant, screenshots/video, support email, and custom launch domain;
-- billing only after the free beta proves the flow.
+- one real WhatsApp-linked merchant run using the Meta test-number allowlist;
+- one merchant-media reel render returned privately;
+- separately consented Vapi declined/granted self-test calls;
+- the operator-owned Meta production number and OTP before arbitrary public users can message Axcas.
+
+Instagram OAuth is deliberately outside the launch claim. Axcas may recommend and render three variations, but it does not advertise automatic social posting or live Instagram learning until a professional account is connected and a separately approved campaign has real metrics. Billing stays off until two merchant acceptances pass.
 
 Do not describe a saved Studio project as a generated website or rendered reel. Do not describe generic format recommendations as live trends unless the source and observation date are recorded.
