@@ -25,7 +25,7 @@ Provider-heavy calls, paid Meta conversations, ad spend, and additional renders 
 
 ## Honest readiness
 
-The Product Hunt beta is about **96% complete**. Studio website projects create a validated candidate, pass through a separate no-credential verifier, and publish only after one owner checklist. Public link creation is rate-limited using short-lived hashed keys. Approved Studio reels now queue to the AWS guardian, render from merchant-scoped private assets, pass ffprobe checks, and return through a private download route. The remaining acceptance gates are:
+The Product Hunt controlled beta is about **97% complete**. Studio website projects create a validated candidate, pass through a separate no-credential verifier, and publish only after one owner checklist. Public link creation is rate-limited using short-lived hashed keys. Approved Studio reels now queue to the AWS guardian, render from merchant-scoped private assets, pass ffprobe checks, and return through a private download route. A fresh live browser has passed the WhatsApp-link screen. The remaining acceptance gates are:
 
 - one real WhatsApp-linked merchant run using the Meta test-number allowlist;
 - one merchant-media reel render returned privately;
