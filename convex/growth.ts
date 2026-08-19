@@ -439,6 +439,32 @@ export const adminCreateApproval = action({
   },
 });
 
+export const resolveStudioApprovalInternal = internalMutation({
+  args: {
+    approvalId: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(),
+    decision: v.union(v.literal("approved"), v.literal("denied")), providerMessageId: v.string(), now: v.number(),
+  },
+  handler: async (context, args) => {
+    const approval = await context.db.query("approvals").withIndex("by_approval_id", (range) => range.eq("approvalId", args.approvalId)).unique();
+    if (!approval || approval.type !== "release" || approval.decision !== "pending" || approval.expiresAt < args.now) return { accepted: false };
+    if (approval.merchantId !== args.merchantId || approval.ownerWaIdHash !== args.ownerWaIdHash) return { accepted: false };
+    await context.db.patch(approval._id, { decision: args.decision, decidedAt: args.now, providerMessageId: args.providerMessageId });
+    return { accepted: true };
+  },
+});
+
+export const adminResolveStudioApproval = action({
+  args: {
+    serviceSecret: v.string(), approvalId: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(),
+    decision: v.union(v.literal("approved"), v.literal("denied")), providerMessageId: v.string(), now: v.number(),
+  },
+  handler: async (context, args): Promise<{ accepted: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.resolveStudioApprovalInternal, record);
+  },
+});
+
 export const registerSocialCampaignInternal = internalMutation({
   args: { campaignId: v.string(), merchantId: v.string(), campaignJson: v.string(), scopeHash: v.string(), approvalId: v.string(), createdAt: v.number() },
   handler: async (context, args) => {

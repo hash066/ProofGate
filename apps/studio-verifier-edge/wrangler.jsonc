@@ -1,0 +1,8 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "axcas-site-verifier",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-12",
+  "workers_dev": true,
+  "preview_urls": false
+}

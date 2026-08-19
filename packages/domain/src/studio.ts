@@ -7,6 +7,7 @@ const safeText = z.string().trim().min(1).max(500).refine(
 const identifier = z.string().regex(/^[a-zA-Z0-9_-]{3,128}$/);
 const merchantId = z.string().regex(/^[a-z0-9-]{3,64}$/);
 const normalizedPosition = z.number().min(0).max(1);
+const e164 = z.string().regex(/^\+[1-9]\d{7,14}$/);
 
 export const StudioIntentSchema = z.enum(["website", "reels", "both"]);
 export type StudioIntent = z.infer<typeof StudioIntentSchema>;
@@ -94,6 +95,14 @@ export const ReelStyleProfileSchema = z.object({
 }).strict();
 export type ReelStyleProfileV1 = z.infer<typeof ReelStyleProfileSchema>;
 
+export const StudioOfferingSchema = z.object({
+  name: safeText,
+  description: safeText,
+  priceMinor: z.number().int().nonnegative().optional(),
+  currency: z.enum(["INR", "USD"]),
+}).strict();
+export type StudioOffering = z.infer<typeof StudioOfferingSchema>;
+
 export const StudioProjectInputSchema = z.object({
   projectId: identifier.optional(),
   parentRevisionId: identifier.optional(),
@@ -103,6 +112,13 @@ export const StudioProjectInputSchema = z.object({
   siteStyle: SiteStyleSchema.optional(),
   reelTemplate: ReelTemplateIdSchema.optional(),
   referenceAssetIds: z.array(identifier).max(12).default([]),
+  siteAssetIds: z.array(identifier).max(12).default([]),
+  orderWhatsAppNumber: e164.optional(),
+  fulfillmentArea: safeText.optional(),
+  leadTime: safeText.optional(),
+  timezone: safeText.optional(),
+  offerings: z.array(StudioOfferingSchema).min(1).max(24).optional(),
+  suppliedClaims: z.array(safeText).max(20).default([]),
   layerOverrides: z.object({
     hook: safeText,
     proof: safeText,

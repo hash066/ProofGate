@@ -5,6 +5,7 @@ import { api } from "../../../convex/_generated/api";
 import { initialSpikeSiteSpec, SiteSpecSchema } from "../../../packages/domain/src/site-spec";
 import { BusinessBriefInputSchema, BusinessBriefSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type LeadConsentV1, type ReelPlanV1, type SiteSpecV2 } from "../../../packages/domain/src/growth";
 import { StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
+import { buildStudioWebsite, MissingStudioFactsError } from "../../../packages/domain/src/studio-builder";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
 import { renderBusinessSite } from "../../../packages/renderer/src/render-bakery-site";
@@ -36,12 +37,24 @@ type Bindings = {
   META_ACCESS_TOKEN?: string;
   META_ACTION_REQUIRED_TEMPLATE?: string;
   AXCAS_WHATSAPP_NUMBER?: string;
+  SITE_VERIFIER_URL?: string;
   PROOFGATE_ASSETS?: R2Bucket;
   PROOFGATE_CONFIG?: KVNamespace;
 };
 type AcknowledgmentResult = { inserted: boolean; passportState: "amber" | "green" };
 type EvidenceBoundary = {
   acknowledge: (token: string, convexUrl?: string) => Promise<AcknowledgmentResult>;
+};
+
+export type StudioVerifierBoundary = {
+  run: (input: {
+    verifierUrl: string;
+    previewUrl: string;
+    evidenceUrl: string;
+    siteId: string;
+    versionId: string;
+    specHash: string;
+  }) => Promise<{ accepted: boolean; passed: boolean; blockers: string[]; runId: string }>;
 };
 
 export type GrowthEvent = {
@@ -73,6 +86,7 @@ export type GrowthAdminBoundary = {
   getPreviewSite: (siteId: string, versionId: string, specHash: string, bindings?: Bindings) => Promise<{ spec: SiteSpecV2; versionId: string; specHash: string } | null>;
   registerLead: (merchantId: string, consent: LeadConsentV1, bindings?: Bindings) => Promise<unknown>;
   createApproval: (input: { approvalId: string; merchantId: string; type: "release" | "call_batch" | "reel" | "social_campaign"; scopeHash: string; expiresAt: number }, bindings?: Bindings) => Promise<unknown>;
+  resolveStudioApproval: (input: { approvalId: string; merchantId: string; ownerWaIdHash: string; decision: "approved" | "denied"; providerMessageId: string }, bindings?: Bindings) => Promise<{ accepted: boolean }>;
   attachApprovalMessage: (approvalId: string, providerMessageId: string, bindings?: Bindings) => Promise<unknown>;
   createCallBatch: (batch: CallBatch, approvalId: string, bindings?: Bindings) => Promise<unknown>;
   registerReel: (plan: ReelPlanV1, planHash: string, approvalId: string, bindings?: Bindings) => Promise<unknown>;
@@ -118,6 +132,24 @@ const liveEvidenceBoundary: EvidenceBoundary = {
     if (!convexUrl) throw new Error("CONVEX_URL is not configured");
     const client = new ConvexHttpClient(convexUrl);
     return client.action(api.oracle.acknowledgeBooking, { token });
+  },
+};
+
+const liveStudioVerifierBoundary: StudioVerifierBoundary = {
+  run: async ({ verifierUrl, ...job }) => {
+    const endpoint = new URL("/verify", verifierUrl);
+    if (endpoint.protocol !== "https:") throw new Error("Studio verifier must use HTTPS");
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(job),
+    });
+    if (!response.ok) throw new Error(`Studio verifier failed with HTTP ${response.status}`);
+    const result = await response.json() as { accepted?: unknown; passed?: unknown; blockers?: unknown; runId?: unknown };
+    if (typeof result.accepted !== "boolean" || typeof result.passed !== "boolean" || !Array.isArray(result.blockers) || result.blockers.some((item) => typeof item !== "string") || typeof result.runId !== "string") {
+      throw new Error("Studio verifier returned an invalid result");
+    }
+    return { accepted: result.accepted, passed: result.passed, blockers: result.blockers as string[], runId: result.runId };
   },
 };
 
@@ -255,6 +287,7 @@ const liveAdminBoundary: GrowthAdminBoundary = {
   },
   registerLead: (merchantId, consent, bindings) => adminClient(bindings).action((api as any).growth.adminRegisterLead, { serviceSecret: serviceSecret(bindings), merchantId, leadId: consent.leadId, phoneCiphertext: consent.phoneCiphertext, phoneHash: consent.phoneHash, country: consent.country, purpose: consent.purpose, source: consent.source, evidenceHash: consent.evidenceHash, grantedAt: consent.grantedAt, revokedAt: consent.revokedAt, localTimezone: consent.localTimezone, callWindowStartHour: consent.callWindow.startHour, callWindowEndHour: consent.callWindow.endHour, createdAt: Date.now() }),
   createApproval: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateApproval, { serviceSecret: serviceSecret(bindings), ...input, providerMessageId: "pending", createdAt: Date.now() }),
+  resolveStudioApproval: (input, bindings) => adminClient(bindings).action((api as any).growth.adminResolveStudioApproval, { serviceSecret: serviceSecret(bindings), ...input, now: Date.now() }),
   attachApprovalMessage: (approvalId, providerMessageId, bindings) => adminClient(bindings).action((api as any).growth.adminAttachApprovalMessage, { serviceSecret: serviceSecret(bindings), approvalId, providerMessageId }),
   createCallBatch: (batch, approvalId, bindings) => adminClient(bindings).action((api as any).growth.adminCreateCallBatch, { serviceSecret: serviceSecret(bindings), ...batch, approvalId, createdAt: Date.now() }),
   registerReel: (plan, planHash, approvalId, bindings) => adminClient(bindings).action((api as any).growth.adminRegisterReel, { serviceSecret: serviceSecret(bindings), reelId: plan.reelId, merchantId: plan.merchantId, planJson: JSON.stringify(plan), planHash, approvalId, status: "draft", createdAt: Date.now() }),
@@ -438,7 +471,7 @@ async function decryptSensitive(value: string, encodedKey: string | undefined): 
   return new TextDecoder().decode(plaintext);
 }
 
-export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBoundary, growthBoundary: GrowthBoundary = liveGrowthBoundary, adminBoundary: GrowthAdminBoundary = liveAdminBoundary): Hono<{ Bindings: Bindings }> {
+export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBoundary, growthBoundary: GrowthBoundary = liveGrowthBoundary, adminBoundary: GrowthAdminBoundary = liveAdminBoundary, studioVerifierBoundary: StudioVerifierBoundary = liveStudioVerifierBoundary): Hono<{ Bindings: Bindings }> {
   const app = new Hono<{ Bindings: Bindings }>();
   app.get("/", (context) => context.html(renderProductHome(), 200, {
     "cache-control": "no-store",
@@ -510,6 +543,86 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     const stored = StudioProjectInputSchema.parse({ ...project, projectId });
     const result = await adminBoundary.saveStudioProject({ projectId, revisionId, parentRevisionId: stored.parentRevisionId, merchantId: session.merchantId, intent: stored.intent, project: stored }, context.env);
     return context.json({ projectId, revisionId, result }, 201, { "cache-control": "no-store" });
+  });
+  app.post("/api/studio/projects/:projectId/build", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const projectId = context.req.param("projectId");
+    const stored = (await adminBoundary.listStudioProjects(session.merchantId, context.env)).find((entry) => entry.projectId === projectId);
+    if (!stored) return context.text("Project not found", 404);
+
+    let built: ReturnType<typeof buildStudioWebsite>;
+    try {
+      built = buildStudioWebsite(stored.project, { merchantId: session.merchantId, ownerWaIdHash: session.ownerWaIdHash });
+    } catch (error) {
+      if (error instanceof MissingStudioFactsError) return context.json({ stage: "needs_input", missing: error.missing }, 409, { "cache-control": "no-store" });
+      if (error instanceof Error && error.message === "reels-only projects do not contain a website") return context.json({ stage: "reel_project", message: "This project does not include a website." }, 409, { "cache-control": "no-store" });
+      throw error;
+    }
+
+    await adminBoundary.upsertMerchant(built.brief, await encryptSensitive(built.brief.orderWhatsAppNumber, context.env?.PROOFGATE_DATA_KEY), context.env);
+    const versionId = `site-${stored.revisionId}`;
+    const specHash = await sha256(canonicalize(built.spec));
+    await adminBoundary.createCandidate({ spec: built.spec, versionId, specHash, actor: `studio:${session.ownerWaIdHash}` }, context.env);
+    const previewExpiresAt = Date.now() + 24 * 60 * 60_000;
+    const previewToken = await createPreviewToken({ siteId: built.spec.siteId, versionId, specHash, expiresAt: previewExpiresAt }, serviceSecret(context.env));
+    const origin = new URL(context.req.url).origin;
+    const previewUrl = `${origin}/preview/${previewToken}`;
+    if (!context.env?.SITE_VERIFIER_URL) {
+      return context.json({ stage: "verification_pending", siteId: built.spec.siteId, versionId, specHash, previewUrl, previewExpiresAt }, 202, { "cache-control": "no-store" });
+    }
+
+    const verificationToken = `pgv_${crypto.randomUUID().replace(/-/g, "")}`;
+    const verificationExpiresAt = Date.now() + 30 * 60_000;
+    await adminBoundary.mintVerification({ tokenHash: await sha256(verificationToken), merchantId: session.merchantId, siteId: built.spec.siteId, versionId, specHash, expiresAt: verificationExpiresAt }, context.env);
+    const verification = await studioVerifierBoundary.run({
+      verifierUrl: context.env.SITE_VERIFIER_URL,
+      previewUrl,
+      evidenceUrl: `${origin}/verification/${verificationToken}`,
+      siteId: built.spec.siteId,
+      versionId,
+      specHash,
+    });
+    if (!verification.accepted || !verification.passed || verification.blockers.length) {
+      return context.json({ stage: "verification_failed", siteId: built.spec.siteId, versionId, specHash, previewUrl, blockers: verification.blockers }, 422, { "cache-control": "no-store" });
+    }
+
+    const scopeHash = await sha256(canonicalize({ siteId: built.spec.siteId, versionId, specHash }));
+    const approvalId = `approval-${crypto.randomUUID()}`;
+    const requestId = `release-${crypto.randomUUID()}`;
+    await adminBoundary.createReleaseRequest({ requestId, siteId: built.spec.siteId, merchantId: session.merchantId, versionId, specHash, scopeHash, approvalId }, context.env);
+    await adminBoundary.createApproval({ approvalId, merchantId: session.merchantId, type: "release", scopeHash, expiresAt: Date.now() + 86_400_000 }, context.env);
+    return context.json({
+      stage: "approval_required", siteId: built.spec.siteId, versionId, specHash, previewUrl, previewExpiresAt,
+      approval: {
+        approvalId,
+        checklist: formatApprovalChecklist({
+          type: "release", subject: `${built.spec.business.name} website`,
+          details: ["Private preview is ready", "Independent checks passed", "Only your supplied details and selected media will publish"],
+        }),
+      },
+    }, 201, { "cache-control": "no-store" });
+  });
+  app.post("/api/studio/approvals/:approvalId", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const approvalId = context.req.param("approvalId");
+    if (!/^approval-[a-zA-Z0-9_-]{8,128}$/.test(approvalId)) return context.text("Invalid approval", 400);
+    let decision: "approved" | "denied";
+    try {
+      const value = (await context.req.json() as { decision?: unknown }).decision;
+      if (value !== "approved" && value !== "denied") throw new Error("invalid decision");
+      decision = value;
+    } catch { return context.text("Choose approve or decline", 400); }
+    const resolved = await adminBoundary.resolveStudioApproval({
+      approvalId, merchantId: session.merchantId, ownerWaIdHash: session.ownerWaIdHash, decision,
+      providerMessageId: `studio:${crypto.randomUUID()}`,
+    }, context.env);
+    if (!resolved.accepted) return context.text("Approval is invalid, expired, or already used", 409);
+    if (decision === "denied") return context.json({ stage: "declined" }, 200, { "cache-control": "no-store" });
+    const promoted = await adminBoundary.promoteRelease(context.env) as { promoted?: boolean; siteId?: string; versionId?: string };
+    if (!promoted.promoted || !promoted.siteId) return context.json({ stage: "publication_pending" }, 202, { "cache-control": "no-store" });
+    return context.json({ stage: "published", siteId: promoted.siteId, versionId: promoted.versionId, siteUrl: `${new URL(context.req.url).origin}/s/${promoted.siteId}` }, 200, { "cache-control": "no-store" });
   });
   app.put("/api/studio/assets/:localAssetId", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);

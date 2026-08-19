@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createApp, type GrowthAdminBoundary, type GrowthBoundary } from "../../apps/edge-runtime/src/index";
+import { createApp, type GrowthAdminBoundary, type GrowthBoundary, type StudioVerifierBoundary } from "../../apps/edge-runtime/src/index";
 import { initialBakerySiteSpec } from "../../packages/domain/src/growth";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../packages/domain/src/tenant";
 import { metaSignatureForTest } from "../../packages/whatsapp-io/src/meta-webhook";
@@ -28,6 +28,7 @@ function adminBoundary(): GrowthAdminBoundary {
       : null),
     registerLead: vi.fn(async () => ({ inserted: true })),
     createApproval: vi.fn(async () => ({ inserted: true })),
+    resolveStudioApproval: vi.fn(async () => ({ accepted: true })),
     attachApprovalMessage: vi.fn(async () => ({ attached: true })),
     createCallBatch: vi.fn(async () => ({ inserted: true })),
     registerReel: vi.fn(async () => ({ inserted: true })),
@@ -73,7 +74,20 @@ describe("growth Worker", () => {
     expect(html).toContain("Create reels");
     expect(html).toContain("I need both");
     expect(html).toContain("Continue with WhatsApp");
+    expect(html).toContain("Order WhatsApp number");
+    expect(html).toContain("What do you offer?");
+    expect(html).toContain("Build checked preview");
+    expect(html).toContain('data-pg="publish-checklist"');
     expect(html).not.toContain("API key");
+  });
+
+  it("wires Studio uploads into a saved revision, checked preview, and one publish action", async () => {
+    const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio.js");
+    const javascript = await response.text();
+    expect(javascript).toContain("referenceAssetIds:assetIds");
+    expect(javascript).toContain("/build");
+    expect(javascript).toContain("/api/studio/approvals/");
+    expect(javascript).toContain("needs_input");
   });
 
   it("creates a short-lived WhatsApp credential link without exposing a secret", async () => {
@@ -151,6 +165,76 @@ describe("growth Worker", () => {
       merchantId: "merchant-maya", intent: "website", projectId: expect.stringMatching(/^project-/), revisionId: expect.stringMatching(/^revision-/),
       project: expect.objectContaining({ businessName: "Maya Studio", siteStyle: "minimal" }),
     }), undefined);
+  });
+
+  it("turns one complete Studio project into a verified candidate and one publish checklist", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioProjects as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      projectId: "project-tailor-1", revisionId: "revision-tailor-1", intent: "website", createdAt: Date.now(),
+      project: {
+        projectId: "project-tailor-1", intent: "website", businessName: "Maya Studio",
+        description: "Custom blouse stitching and alterations in Bengaluru", siteStyle: "portfolio",
+        referenceAssetIds: ["merchant-asset-front"], orderWhatsAppNumber: "+919876543210",
+        fulfillmentArea: "Bengaluru", leadTime: "Ready in 5–7 days", timezone: "Asia/Kolkata",
+        offerings: [{ name: "Custom blouse", description: "Made to your measurements", priceMinor: 150000, currency: "INR" }],
+        suppliedClaims: ["Custom stitching"],
+      },
+    }]);
+    const verifier: StudioVerifierBoundary = {
+      run: vi.fn(async () => ({ accepted: true, passed: true, blockers: [], runId: "studio-verify-1" })),
+    };
+    const response = await createApp(undefined, boundary(), admin, verifier).request("http://proofgate.test/api/studio/projects/project-tailor-1/build", {
+      method: "POST", headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+    }, {
+      PROOFGATE_SERVICE_SECRET: "service-secret",
+      PROOFGATE_DATA_KEY: Buffer.alloc(32, 7).toString("base64"),
+      SITE_VERIFIER_URL: "https://proofgate-site-verifier.workers.dev",
+    } as never);
+
+    expect(response.status).toBe(201);
+    const result = await response.json() as any;
+    expect(result).toMatchObject({ stage: "approval_required", siteId: expect.stringMatching(/^maya-studio-/), approval: { approvalId: expect.stringMatching(/^approval-/) } });
+    expect(result.previewUrl).toMatch(/^http:\/\/proofgate\.test\/preview\/pgp_/);
+    expect(result.approval.checklist).toContain("Approval checklist");
+    expect(admin.upsertMerchant).toHaveBeenCalledWith(expect.objectContaining({ businessType: "tailor" }), expect.stringMatching(/^aesgcm:v1:/), expect.anything());
+    expect(admin.createCandidate).toHaveBeenCalledWith(expect.objectContaining({ actor: expect.stringMatching(/^studio:/), spec: expect.objectContaining({ businessType: "tailor" }) }), expect.anything());
+    expect(admin.mintVerification).toHaveBeenCalledOnce();
+    expect(verifier.run).toHaveBeenCalledWith(expect.objectContaining({ previewUrl: result.previewUrl, evidenceUrl: expect.stringMatching(/^http:\/\/proofgate\.test\/verification\/pgv_/) }));
+    expect(admin.createReleaseRequest).toHaveBeenCalledOnce();
+    expect(admin.createApproval).toHaveBeenCalledWith(expect.objectContaining({ type: "release" }), expect.anything());
+  });
+
+  it("returns one consolidated Studio correction instead of making up missing facts", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioProjects as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      projectId: "project-draft-1", revisionId: "revision-draft-1", intent: "website", createdAt: Date.now(),
+      project: { projectId: "project-draft-1", intent: "website", businessName: "Draft Business", description: "A local service", siteStyle: "minimal", referenceAssetIds: [], suppliedClaims: [] },
+    }]);
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/projects/project-draft-1/build", {
+      method: "POST", headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret" } as never);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ stage: "needs_input", missing: ["orderWhatsAppNumber", "fulfillmentArea", "leadTime", "offerings", "referenceAssetIds"] });
+    expect(admin.createCandidate).not.toHaveBeenCalled();
+  });
+
+  it("publishes only after the WhatsApp-linked Studio owner accepts the single checklist", async () => {
+    const admin = adminBoundary() as GrowthAdminBoundary & { resolveStudioApproval: ReturnType<typeof vi.fn> };
+    admin.resolveStudioApproval = vi.fn(async () => ({ accepted: true }));
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.promoteRelease as ReturnType<typeof vi.fn>).mockResolvedValue({ promoted: true, siteId: "maya-studio-abcdef", versionId: "site-revision-1" });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/approvals/approval-12345678", {
+      method: "POST", headers: { "content-type": "application/json", cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+      body: JSON.stringify({ decision: "approved" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ stage: "published", siteUrl: "http://proofgate.test/s/maya-studio-abcdef" });
+    expect(admin.resolveStudioApproval).toHaveBeenCalledWith(expect.objectContaining({
+      approvalId: "approval-12345678", merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), decision: "approved",
+    }), undefined);
+    expect(admin.promoteRelease).toHaveBeenCalledOnce();
   });
   it("shows the sellable WhatsApp-first customer journey at the public root", async () => {
     const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/");
