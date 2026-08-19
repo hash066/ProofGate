@@ -1,0 +1,22 @@
+[Unit]
+Description=Axcas approved consent-first call dispatcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proofgate
+Group=proofgate
+WorkingDirectory=/opt/proofgate/ProofGate
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/proofgate/hermes.env
+ExecStart=/usr/bin/npm run start --workspace @axcas/call-guardian
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

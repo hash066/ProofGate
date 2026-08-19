@@ -128,6 +128,16 @@ describe("AWS Hermes runtime assets", () => {
     expect(script).toContain("systemctl enable axcas-reel-guardian.service");
   });
 
+  it("runs the approved call guardian as a restricted AWS service", async () => {
+    const unit = await readFile("infra/aws/systemd/axcas-call-guardian.service", "utf8");
+    const script = await readFile("infra/aws/install-runtime.sh", "utf8");
+    expect(unit).toContain("User=proofgate");
+    expect(unit).toContain("NoNewPrivileges=true");
+    expect(unit).toContain("@axcas/call-guardian");
+    expect(script).toContain("axcas-call-guardian.service");
+    expect(script).toContain("systemctl enable axcas-call-guardian.service");
+  });
+
   it("runs the named tunnel from a root-readable token file", async () => {
     const unit = await readFile("infra/aws/systemd/proofgate-cloudflared.service", "utf8");
     expect(unit).toContain("--token-file /etc/proofgate/cloudflared-token");
