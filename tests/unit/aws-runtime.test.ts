@@ -8,7 +8,7 @@ describe("AWS Hermes runtime assets", () => {
     expect(script).toContain('REPOSITORY_COMMIT="${2:?');
     expect(script).toMatch(/git .* checkout --detach/);
     expect(script).toMatch(/npm .* ci --ignore-scripts/);
-    expect(script).toContain("npm --prefix /opt/proofgate/ProofGate exec -- remotion browser ensure");
+    expect(script).toContain("sudo -H -u proofgate env HOME=/home/proofgate npm exec -- remotion browser ensure");
     expect(script).toContain("hermes/skills/proofgate");
     expect(script).toContain('venv/bin/pip install -e ".[messaging]"');
     expect(script).toContain(

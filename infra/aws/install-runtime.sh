@@ -25,8 +25,11 @@ fi
 sudo -u proofgate git -C /opt/proofgate/ProofGate fetch --depth 1 origin "${REPOSITORY_COMMIT}"
 sudo -u proofgate git -C /opt/proofgate/ProofGate checkout --detach "${REPOSITORY_COMMIT}"
 test "$(sudo -u proofgate git -C /opt/proofgate/ProofGate rev-parse HEAD)" = "${REPOSITORY_COMMIT}"
-sudo -u proofgate npm --prefix /opt/proofgate/ProofGate ci --ignore-scripts
-sudo -u proofgate npm --prefix /opt/proofgate/ProofGate exec -- remotion browser ensure
+sudo -H -u proofgate env HOME=/home/proofgate npm --prefix /opt/proofgate/ProofGate ci --ignore-scripts
+(
+  cd /opt/proofgate/ProofGate
+  sudo -H -u proofgate env HOME=/home/proofgate npm exec -- remotion browser ensure
+)
 
 test -x /opt/proofgate/hermes-agent/venv/bin/pip
 (
