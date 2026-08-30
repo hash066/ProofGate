@@ -20,4 +20,10 @@ describe("Axcas Hermes merchant experience", () => {
     expect(skill).toContain("Never send raw HTML");
     expect(skill).toContain("merchant supplies none of them");
   });
+
+  it("keeps the linked Studio account synchronized after WhatsApp changes", async () => {
+    const skill = await readFile("hermes/skills/proofgate/SKILL.md", "utf8");
+    expect(skill).toContain("submit a fresh `intake` after every accepted business-detail change");
+    expect(skill).toContain("linked Studio workspace refreshes automatically");
+  });
 });

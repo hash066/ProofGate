@@ -75,6 +75,8 @@ A `require_approval` result creates exactly one scoped approval at the point of 
 5. Submit `BusinessBriefV1`, then a business-type-aware `SiteSpecV2` candidate. Agents produce data, never HTML, JavaScript, or CSS. When the merchant chooses a visual direction, encode one constrained layout in `theme.layout`: `minimal`, `editorial`, `catalog`, `services`, or `portfolio`.
 6. The candidate response includes an expiring `previewUrl`. Send that clickable URL to the merchant with one short summary. Never send raw HTML, a local file path, JSON, storage details, or an infrastructure explanation as the preview. Axcas owns the Worker, Convex storage, AWS runtime, and provider credentials; the merchant supplies none of them.
 
+After the first intake, submit a fresh `intake` after every accepted business-detail change received in WhatsApp, including corrections from text or voice. The boundary appends an immutable revision to the same merchant account, so the linked Studio workspace refreshes automatically. Do not ask the merchant to repeat the change in Studio, and do not overwrite a browser draft while the merchant is actively editing; Studio surfaces the newer WhatsApp revision for them to load.
+
 ## Approval and release
 
 All approval buttons have `pg:<approvalId>:approve|deny`. The message body is one plain-language checklist: the subject, checked facts/assets/safety gates, the exact action approval triggers, and “Nothing else will run.” The Cloudflare Worker verifies the Meta signature, hashes the authenticated sender, and records the decision. Free-form confirmations do not replace a signed button. An approval is valid only for its exact scope hash, owner, and expiry. Editing a candidate, call batch, or reel invalidates its approval.

@@ -107,6 +107,24 @@ export const adminGetStudioSession = query({
   },
 });
 
+export const revokeStudioSessionInternal = internalMutation({
+  args: { sessionHash: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    const session = await context.db.query("studioSessions").withIndex("by_session_hash", (range) => range.eq("sessionHash", args.sessionHash)).unique();
+    if (!session || session.revokedAt) return { revoked: false };
+    await context.db.patch(session._id, { revokedAt: args.now });
+    return { revoked: true };
+  },
+});
+
+export const adminRevokeStudioSession = action({
+  args: { serviceSecret: v.string(), sessionHash: v.string(), now: v.number() },
+  handler: async (context, args): Promise<{ revoked: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    return context.runMutation(internal.growth.revokeStudioSessionInternal, { sessionHash: args.sessionHash, now: args.now });
+  },
+});
+
 export const saveStudioProjectInternal = internalMutation({
   args: {
     projectId: v.string(), revisionId: v.string(), parentRevisionId: v.optional(v.string()), merchantId: v.string(),

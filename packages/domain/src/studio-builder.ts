@@ -48,6 +48,42 @@ const accentByType: Record<BusinessType, string> = {
   other: "#3f5f75",
 };
 
+const siteStyleByType: Record<BusinessType, StudioProjectInput["siteStyle"]> = {
+  home_bakery: "catalog",
+  tailor: "portfolio",
+  tutor: "services",
+  salon: "portfolio",
+  home_service: "services",
+  retailer: "catalog",
+  other: "minimal",
+};
+
+export function studioProjectFromBusinessBrief(briefInput: unknown): StudioProjectInput {
+  const brief = BusinessBriefSchema.parse(briefInput);
+  const assetIds = Array.from(new Set(brief.catalog.map((item) => item.imageAssetId)));
+  const projectId = `project-whatsapp-${brief.merchantId.replace(/^merchant-/, "")}`.slice(0, 128);
+  return StudioProjectInputSchema.parse({
+    projectId,
+    intent: "website",
+    businessName: brief.businessName,
+    description: brief.description,
+    siteStyle: siteStyleByType[brief.businessType],
+    referenceAssetIds: assetIds,
+    siteAssetIds: assetIds,
+    orderWhatsAppNumber: brief.orderWhatsAppNumber,
+    fulfillmentArea: brief.fulfillmentArea,
+    leadTime: brief.leadTime,
+    timezone: brief.timezone,
+    offerings: brief.catalog.map((item) => ({
+      name: item.name,
+      description: item.description ?? `Ask us about ${item.name}.`,
+      priceMinor: item.priceMinor,
+      currency: item.currency,
+    })),
+    suppliedClaims: brief.suppliedClaims,
+  });
+}
+
 export function buildStudioWebsite(input: unknown, owner: StudioOwnerIdentity): { brief: BusinessBriefV1; spec: SiteSpecV2 } {
   const project = StudioProjectInputSchema.parse(input);
   if (project.intent === "reels") throw new Error("reels-only projects do not contain a website");

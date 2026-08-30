@@ -5,7 +5,7 @@ import { api } from "../../../convex/_generated/api";
 import { initialSpikeSiteSpec, SiteSpecSchema } from "../../../packages/domain/src/site-spec";
 import { BusinessBriefInputSchema, BusinessBriefSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type LeadConsentV1, type ReelPlanV1, type SiteSpecV2 } from "../../../packages/domain/src/growth";
 import { StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
-import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError } from "../../../packages/domain/src/studio-builder";
+import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError, studioProjectFromBusinessBrief } from "../../../packages/domain/src/studio-builder";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
 import { renderBusinessSite } from "../../../packages/renderer/src/render-bakery-site";
@@ -110,6 +110,7 @@ export type GrowthAdminBoundary = {
   claimStudioLink: (input: { codeHash: string; merchantId: string; ownerWaIdHash: string; providerMessageId: string }, bindings?: Bindings) => Promise<{ linked: boolean }>;
   completeStudioLink: (input: { linkId: string; browserNonceHash: string; sessionHash: string; sessionExpiresAt: number }, bindings?: Bindings) => Promise<{ status: "pending" | "expired" | "authenticated"; merchantId?: string; ownerWaIdHash?: string; intent?: StudioIntent }>;
   getStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ merchantId: string; ownerWaIdHash: string; expiresAt: number } | null>;
+  revokeStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ revoked: boolean }>;
   saveStudioProject: (input: { projectId: string; revisionId: string; parentRevisionId?: string; merchantId: string; intent: StudioIntent; project: StudioProjectInput }, bindings?: Bindings) => Promise<unknown>;
   listStudioProjects: (merchantId: string, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; project: StudioProjectInput; createdAt: number }>>;
 };
@@ -169,6 +170,7 @@ async function sha256Bytes(value: Uint8Array): Promise<string> {
 
 const MAX_ASSET_BYTES = 16 * 1024 * 1024;
 const STUDIO_RESPONSIVE_CSS = "h1{font-size:clamp(2.8rem,7vw,5.5rem);text-wrap:balance}.mode-card{min-width:0}@media(min-width:851px){.three{grid-template-columns:repeat(3,minmax(0,1fr))}}";
+const STUDIO_ACCOUNT_CSS = ".account-panel{display:grid;grid-template-columns:1fr auto;gap:18px;border:1px solid var(--line);border-radius:18px;padding:18px;margin:24px 0;background:#fbfaf7}.saved-work{grid-column:1/-1;border-top:1px solid var(--line);padding-top:14px}.project-list{display:flex;gap:10px;overflow-x:auto;padding-top:10px}.project-chip{min-width:210px;text-align:left;display:block}.project-chip small{display:block;color:var(--muted);font-weight:500}@media(max-width:850px){.account-panel{grid-template-columns:1fr}.saved-work{grid-column:1}.project-list{display:grid}}";
 
 function asciiAt(value: Uint8Array, offset: number, expected: string): boolean {
   if (value.byteLength < offset + expected.length) return false;
@@ -411,6 +413,9 @@ const liveAdminBoundary: GrowthAdminBoundary = {
   getStudioSession: (sessionHash, bindings) => adminClient(bindings).query((api as any).growth.adminGetStudioSession, {
     serviceSecret: serviceSecret(bindings), sessionHash, now: Date.now(),
   }),
+  revokeStudioSession: (sessionHash, bindings) => adminClient(bindings).action((api as any).growth.adminRevokeStudioSession, {
+    serviceSecret: serviceSecret(bindings), sessionHash, now: Date.now(),
+  }),
   saveStudioProject: (input, bindings) => adminClient(bindings).action((api as any).growth.adminSaveStudioProject, {
     serviceSecret: serviceSecret(bindings), projectId: input.projectId, revisionId: input.revisionId,
     parentRevisionId: input.parentRevisionId, merchantId: input.merchantId, intent: input.intent,
@@ -529,7 +534,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
   }));
-  app.get("/studio.css", (context) => context.body(`${renderStudioCss()}${STUDIO_RESPONSIVE_CSS}`, 200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
+  app.get("/studio.css", (context) => context.body(`${renderStudioCss()}${STUDIO_RESPONSIVE_CSS}${STUDIO_ACCOUNT_CSS}`, 200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
   app.get("/studio.js", (context) => context.body(renderStudioClientJs(), 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
   app.post("/api/studio/link", async (context) => {
     let intent: StudioIntent;
@@ -573,7 +578,22 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
   }
   app.get("/api/studio/me", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
-    return session ? context.json({ authenticated: true }, 200, { "cache-control": "no-store" }) : context.text("Unauthorized", 401);
+    if (!session) return context.text("Unauthorized", 401);
+    const projects = await adminBoundary.listStudioProjects(session.merchantId, context.env);
+    const displayName = projects[0]?.project.businessName ?? "Your Axcas workspace";
+    return context.json({
+      authenticated: true,
+      account: { method: "whatsapp", verified: true, displayName, sessionExpiresAt: session.expiresAt },
+      projects: projects.map((project) => ({ ...project, source: project.projectId.startsWith("project-whatsapp-") ? "whatsapp" : "studio" })),
+    }, 200, { "cache-control": "no-store" });
+  });
+  app.post("/api/studio/logout", async (context) => {
+    const raw = cookieValue(context.req.header("cookie"), "axcas_session");
+    if (raw && /^[A-Za-z0-9_-]{30,100}$/.test(raw)) await adminBoundary.revokeStudioSession(await sha256(raw), context.env);
+    return context.body(null, 204, {
+      "cache-control": "no-store",
+      "set-cookie": "axcas_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
+    });
   });
   app.get("/api/studio/projects", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
@@ -858,7 +878,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
         await sendTextMessage({
           graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
           accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: studioLink.senderWaId,
-          body: "✅ Browser linked. Return to Axcas Studio—your workspace will unlock automatically.",
+          body: `✅ Browser linked. Your WhatsApp and Studio now share one workspace: ${new URL(context.req.url).origin}/studio`,
         });
       }
       return context.json({ linked: true }, 200);
@@ -900,7 +920,15 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     const { merchantId: _merchantId, ownerWaIdHash: _ownerWaIdHash, ...merchantInput } = submitted;
     const brief = BusinessBriefSchema.parse({ ...BusinessBriefInputSchema.parse(merchantInput), ...identity });
     const result = await adminBoundary.upsertMerchant(brief, await encryptSensitive(brief.orderWhatsAppNumber, context.env?.PROOFGATE_DATA_KEY), context.env);
-    return context.json({ accepted: true, merchantId: brief.merchantId, result }, 201);
+    const project = studioProjectFromBusinessBrief(brief);
+    const revisionId = `revision-whatsapp-${(await sha256(canonicalize(brief))).slice(0, 32)}`;
+    const existing = (await adminBoundary.listStudioProjects(brief.merchantId, context.env)).find((entry) => entry.projectId === project.projectId);
+    const studioResult = await adminBoundary.saveStudioProject({
+      projectId: project.projectId!, revisionId, parentRevisionId: existing?.revisionId,
+      merchantId: brief.merchantId, intent: project.intent,
+      project: existing ? StudioProjectInputSchema.parse({ ...project, parentRevisionId: existing.revisionId }) : project,
+    }, context.env);
+    return context.json({ accepted: true, merchantId: brief.merchantId, result, studio: { projectId: project.projectId, revisionId, result: studioResult } }, 201);
   });
   app.post("/internal/policy", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
