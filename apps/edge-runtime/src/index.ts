@@ -8,6 +8,7 @@ import { StudioIntakeInputSchema, StudioIntentSchema, StudioProjectInputSchema, 
 import { CustomerOutboxMessageSchema, WorkflowProgressSchema, WorkflowStatusSchema, decodeProjectCursor, encodeProjectCursor, nextProjectCursor, type ProjectSyncCursor } from "../../../packages/domain/src/workflow";
 import { quotaExceededCustomerMessage, type UsageMetric, type UsageReservationBatch } from "../../../packages/domain/src/usage";
 import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError, studioProjectFromBusinessBrief } from "../../../packages/domain/src/studio-builder";
+import { ReelRenderEvidenceSchema, type ReelRenderEvidence } from "../../../packages/domain/src/reel-evidence";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
 import { renderBusinessSite } from "../../../packages/renderer/src/render-bakery-site";
@@ -17,7 +18,8 @@ import { renderStudioClientJs } from "../../../packages/renderer/src/render-stud
 import { renderDataDeletion, renderPrivacyPolicy, renderTermsOfService } from "../../../packages/renderer/src/render-legal";
 import { renderSite } from "../../../packages/renderer/src/render-site";
 import { authenticateVapiWebhook } from "../../../packages/calls/src/vapi";
-import { createQualificationCalls } from "../../../packages/calls/src/vapi-client";
+import { createQualificationCall } from "../../../packages/calls/src/vapi-client";
+import { CallArtifactCopyReceiptSchema } from "../../../packages/calls/src/attempts";
 import { createCallBatch, type CallBatch } from "../../../packages/release-policy/src/growth-policy";
 import { createSocialCampaign, type SocialCampaign } from "../../../packages/social/src/experiment";
 import { sendActionRequiredTemplate, sendApprovalButtons, sendTextMessage, sendVideoByMediaId, uploadMetaMedia } from "../../../packages/whatsapp-io/src/meta-client";
@@ -31,6 +33,7 @@ type Bindings = {
   VAPI_API_KEY?: string;
   VAPI_PHONE_NUMBER_ID?: string;
   VAPI_SQUAD_ID?: string;
+  CALLING_LIVE_ENABLED?: string;
   HERMES_ORIGIN_URL?: string;
   HERMES_PROXY_SECRET?: string;
   PROOFGATE_SERVICE_SECRET?: string;
@@ -99,10 +102,14 @@ export type GrowthAdminBoundary = {
   getPrivateAsset: (assetId: string, bindings?: Bindings) => Promise<{ body: Uint8Array; contentType: string; etag: string } | null>;
   getPrivateAssetForMerchant: (assetId: string, merchantId: string, bindings?: Bindings) => Promise<{ body: Uint8Array; contentType: string; etag: string } | null>;
   metrics: (siteId: string, merchantId: string, since: number, bindings?: Bindings) => Promise<unknown>;
-  claimCallBatch: (bindings?: Bindings) => Promise<null | { batchId: string; earliestAt: number; leads: Array<{ leadId: string; phoneCiphertext: string }> }>;
+  claimCallBatch: (bindings?: Bindings) => Promise<null | { attemptId: string; batchId: string; earliestAt: number; leadId: string; phoneCiphertext: string; remainingCostMicrousd: number }>;
+  updateCallAttempt: (input: { attemptId: string; status: "provider_created" | "failed"; providerCallId?: string; failureCode?: string }, bindings?: Bindings) => Promise<{ updated: boolean }>;
+  registerCallArtifact: (input: { artifactId: string; attemptId: string; providerCallId: string; bucketKey: string; sha256: string; byteLength: number; copiedAt: number; expiresAt: number }, bindings?: Bindings) => Promise<{ inserted: boolean }>;
   claimReel: (bindings?: Bindings) => Promise<null | { reelId: string; planJson: string; planHash: string }>;
-  completeReel: (reelId: string, status: "rendered" | "failed", renderedAssetId: string | undefined, deliveredProviderMessageId?: string, bindings?: Bindings) => Promise<unknown>;
-  getReelStatus: (reelId: string, merchantId: string, bindings?: Bindings) => Promise<{ status: "draft" | "rendering" | "rendered" | "failed"; renderedAssetId?: string } | null>;
+  completeReel: (input: { reelId: string; status: "rendered" | "delivery_failed"; renderedAssetId?: string; renderEvidenceJson?: string; renderEvidenceHash?: string; failureCode?: string }, bindings?: Bindings) => Promise<{ completed: boolean; status: string; merchantId: string }>;
+  beginReelDelivery: (input: { reelId: string; merchantId: string; renderedAssetId: string; recipientHash: string }, bindings?: Bindings) => Promise<{ claimed: boolean; status: string; providerMessageId?: string }>;
+  finishReelDelivery: (input: { reelId: string; status: "delivered" | "delivery_failed"; providerMessageId?: string; failureCode?: string }, bindings?: Bindings) => Promise<{ completed: boolean; status: string }>;
+  getReelStatus: (reelId: string, merchantId: string, bindings?: Bindings) => Promise<{ status: "draft" | "approved" | "rendering" | "rendered" | "delivering" | "delivered" | "delivery_failed"; renderedAssetId?: string; providerMessageId?: string } | null>;
   mintVerification: (input: { tokenHash: string; merchantId: string; siteId: string; versionId: string; specHash: string; expiresAt: number }, bindings?: Bindings) => Promise<unknown>;
   createReleaseRequest: (input: { requestId: string; siteId: string; merchantId: string; versionId: string; specHash: string; scopeHash: string; approvalId: string }, bindings?: Bindings) => Promise<unknown>;
   promoteRelease: (bindings?: Bindings) => Promise<unknown>;
@@ -409,8 +416,12 @@ const liveAdminBoundary: GrowthAdminBoundary = {
   },
   metrics: (siteId, merchantId, since, bindings) => adminClient(bindings).query((api as any).growth.metricsSummary, { serviceSecret: serviceSecret(bindings), siteId, merchantId, since }),
   claimCallBatch: (bindings) => adminClient(bindings).action((api as any).growth.adminClaimApprovedCallBatch, { serviceSecret: serviceSecret(bindings), now: Date.now() }),
+  updateCallAttempt: (input, bindings) => adminClient(bindings).action((api as any).growth.adminUpdateCallAttempt, { serviceSecret: serviceSecret(bindings), ...input, now: Date.now() }),
+  registerCallArtifact: (input, bindings) => adminClient(bindings).action((api as any).growth.adminRegisterCallArtifact, { serviceSecret: serviceSecret(bindings), ...input }),
   claimReel: (bindings) => adminClient(bindings).action((api as any).growth.adminClaimApprovedReel, { serviceSecret: serviceSecret(bindings), now: Date.now() }),
-  completeReel: (reelId, status, renderedAssetId, deliveredProviderMessageId, bindings) => adminClient(bindings).action((api as any).growth.adminCompleteReel, { serviceSecret: serviceSecret(bindings), reelId, status, renderedAssetId, deliveredProviderMessageId }),
+  completeReel: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCompleteReel, { serviceSecret: serviceSecret(bindings), ...input }),
+  beginReelDelivery: (input, bindings) => adminClient(bindings).action((api as any).growth.adminBeginReelDelivery, { serviceSecret: serviceSecret(bindings), ...input, now: Date.now() }),
+  finishReelDelivery: (input, bindings) => adminClient(bindings).action((api as any).growth.adminFinishReelDelivery, { serviceSecret: serviceSecret(bindings), ...input, now: Date.now() }),
   getReelStatus: (reelId, merchantId, bindings) => adminClient(bindings).query((api as any).growth.adminGetReelStatus, { serviceSecret: serviceSecret(bindings), reelId, merchantId }),
   mintVerification: (input, bindings) => adminClient(bindings).action((api as any).growth.adminMintVerificationCapability, { serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now() }),
   createReleaseRequest: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateGrowthReleaseRequest, { serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now() }),
@@ -831,7 +842,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     await adminBoundary.registerReel(built.plan, planHash, approvalId, context.env);
     await adminBoundary.createApproval({ approvalId, merchantId: session.merchantId, type: "reel", scopeHash: planHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     return context.json({
-      stage: "approval_required", reelId: built.plan.reelId, suggestions: built.suggestions,
+      stage: "approval_required", reelId: built.plan.reelId, recommendations: built.recommendations,
       approval: { approvalId, checklist: formatApprovalChecklist({ type: "reel", subject: built.plan.angle, details: ["Uses only your selected photos", "15-second vertical render", "Your supplied hook, proof, CTA, and claims", "Returned privately; not posted" ] }) },
     }, 201, { "cache-control": "no-store" });
   });
@@ -864,7 +875,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!/^[a-z0-9-]{3,64}$/.test(reelId)) return context.text("Invalid reel", 400);
     const reel = await adminBoundary.getReelStatus(reelId, session.merchantId, context.env);
     if (!reel) return context.notFound();
-    return context.json({ status: reel.status, ...(reel.status === "rendered" ? { mediaUrl: `/api/studio/reels/${reelId}/media` } : {}) }, 200, { "cache-control": "no-store" });
+    return context.json({ status: reel.status, ...(reel.renderedAssetId && ["rendered", "delivering", "delivered", "delivery_failed"].includes(reel.status) ? { mediaUrl: `/api/studio/reels/${reelId}/media` } : {}) }, 200, { "cache-control": "no-store" });
   });
   app.get("/api/studio/reels/:reelId/media", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
@@ -872,7 +883,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     const reelId = context.req.param("reelId");
     if (!/^[a-z0-9-]{3,64}$/.test(reelId)) return context.text("Invalid reel", 400);
     const reel = await adminBoundary.getReelStatus(reelId, session.merchantId, context.env);
-    if (!reel?.renderedAssetId || reel.status !== "rendered") return context.notFound();
+    if (!reel?.renderedAssetId || !["rendered", "delivering", "delivered", "delivery_failed"].includes(reel.status)) return context.notFound();
     const media = await adminBoundary.getPrivateAsset(reel.renderedAssetId, context.env);
     if (!media || media.contentType !== "video/mp4") return context.notFound();
     return new Response(media.body as BodyInit, { headers: { "content-type": "video/mp4", "cache-control": "private, no-store", "content-disposition": `attachment; filename="${reelId}.mp4"`, "x-content-type-options": "nosniff" } });
@@ -1372,32 +1383,67 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     }
     if (payload.kind === "release") return context.json(await adminBoundary.promoteRelease(context.env));
     if (payload.kind !== "calls") return context.text("kind must be calls, reel, or release", 400);
+    if (context.env?.CALLING_LIVE_ENABLED !== "true") return context.json({ claimed: false, blocked: "calling_feature_not_live" }, 503);
     if (!context.env?.VAPI_API_KEY || !context.env.VAPI_PHONE_NUMBER_ID || !context.env.VAPI_SQUAD_ID || !context.env.PROOFGATE_DATA_KEY) {
       return context.json({ claimed: false, blocked: "missing_vapi_or_data_key_configuration" }, 503);
     }
     const job = await adminBoundary.claimCallBatch(context.env);
     if (!job) return context.json({ claimed: false });
     try {
-      const leads = await Promise.all(job.leads.map(async (lead) => ({ leadId: lead.leadId, number: await decryptSensitive(lead.phoneCiphertext, context.env.PROOFGATE_DATA_KEY) })));
-      const calls = await createQualificationCalls({
+      const call = await createQualificationCall({
         apiKey: context.env.VAPI_API_KEY,
         phoneNumberId: context.env.VAPI_PHONE_NUMBER_ID,
         squadId: context.env.VAPI_SQUAD_ID,
         batchId: job.batchId,
+        attemptId: job.attemptId,
         earliestAt: new Date(job.earliestAt).toISOString(),
-        leads,
+        lead: { leadId: job.leadId, number: await decryptSensitive(job.phoneCiphertext, context.env.PROOFGATE_DATA_KEY) },
       });
-      return context.json({ claimed: true, batchId: job.batchId, calls }, 201);
+      await adminBoundary.updateCallAttempt({ attemptId: job.attemptId, status: "provider_created", providerCallId: call.callId }, context.env);
+      return context.json({ claimed: true, attemptId: job.attemptId, batchId: job.batchId, call }, 201);
     } catch (error) {
-      return context.json({ claimed: true, batchId: job.batchId, dispatched: false, error: error instanceof Error ? error.message : "provider failure" }, 502);
+      await adminBoundary.updateCallAttempt({ attemptId: job.attemptId, status: "failed", failureCode: "provider_request_failed" }, context.env).catch(() => undefined);
+      return context.json({ claimed: true, attemptId: job.attemptId, batchId: job.batchId, dispatched: false, error: error instanceof Error ? error.message : "provider failure" }, 502);
     }
+  });
+  app.post("/internal/call-artifact", async (context) => {
+    if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
+    let receipt;
+    try { receipt = CallArtifactCopyReceiptSchema.parse(await context.req.json()); }
+    catch { return context.text("Invalid consented recording copy receipt", 400); }
+    const { schemaVersion: _schemaVersion, recordingConsent: _recordingConsent, ...record } = receipt;
+    return context.json(await adminBoundary.registerCallArtifact(record, context.env), 201);
   });
   app.post("/internal/reel-result", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
-    const payload = await context.req.json() as { reelId?: string; status?: string; renderedAssetId?: string };
-    if (!payload.reelId || (payload.status !== "rendered" && payload.status !== "failed")) return context.text("Invalid reel result", 400);
-    if (payload.status === "rendered" && !payload.renderedAssetId) return context.text("renderedAssetId is required", 400);
-    return context.json(await adminBoundary.completeReel(payload.reelId, payload.status, payload.renderedAssetId, undefined, context.env));
+    const payload = await context.req.json() as { reelId?: string; status?: string; renderedAssetId?: string; evidence?: unknown; failureCode?: string };
+    if (!payload.reelId || !/^[a-zA-Z0-9_-]{3,128}$/.test(payload.reelId) || (payload.status !== "rendered" && payload.status !== "delivery_failed")) return context.text("Invalid reel result", 400);
+    if (payload.status === "delivery_failed") {
+      if (!payload.failureCode || !/^[a-z0-9_:-]{3,80}$/.test(payload.failureCode)) return context.text("failureCode is required", 400);
+      return context.json(await adminBoundary.completeReel({ reelId: payload.reelId, status: "delivery_failed", failureCode: payload.failureCode }, context.env));
+    }
+    if (!payload.renderedAssetId) return context.text("renderedAssetId is required", 400);
+    let evidence: ReelRenderEvidence;
+    try { evidence = ReelRenderEvidenceSchema.parse(payload.evidence); }
+    catch { return context.text("Verified FFprobe and Polly evidence is required", 400); }
+    const renderEvidenceJson = canonicalize(evidence);
+    const renderEvidenceHash = await sha256(renderEvidenceJson);
+    const result = await adminBoundary.completeReel({
+      reelId: payload.reelId, status: "rendered", renderedAssetId: payload.renderedAssetId,
+      renderEvidenceJson, renderEvidenceHash,
+    }, context.env);
+    const occurredAt = Date.now();
+    await adminBoundary.recordActualUsage({
+      usageEntryId: `actual:render:${payload.reelId}`, idempotencyKey: `actual:render:${payload.reelId}`,
+      operationId: `reel:${payload.reelId}`, merchantId: result.merchantId, metric: "render_seconds", quantity: Math.ceil(evidence.ffprobe.durationSeconds),
+      evidenceRef: `reel-render:${renderEvidenceHash}:ffprobe`, occurredAt,
+    }, context.env);
+    await adminBoundary.recordActualUsage({
+      usageEntryId: `actual:polly:${payload.reelId}`, idempotencyKey: `actual:polly:${payload.reelId}`,
+      operationId: `reel:${payload.reelId}`, merchantId: result.merchantId, metric: "polly_characters", quantity: evidence.polly.characters,
+      evidenceRef: `reel-render:${renderEvidenceHash}:polly`, occurredAt,
+    }, context.env);
+    return context.json({ completed: result.completed, status: result.status });
   });
   app.post("/internal/reel-delivery", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
@@ -1412,17 +1458,31 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!object) return context.text("Rendered reel asset not found", 404);
     const contentType = object.contentType;
     if (contentType !== "video/mp4") return context.text("Rendered asset is not an MP4", 409);
-    const media = await uploadMetaMedia({
-      graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
-      accessToken: context.env.META_ACCESS_TOKEN, bytes: object.body, contentType, filename: `${payload.reelId}.mp4`,
-    });
-    const receipt = await sendVideoByMediaId({
-      graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
-      accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: payload.recipientWaId, mediaId: media.mediaId, caption: payload.caption,
-    });
-    await recordOutboundMessage(recipientTenant.merchantId, deliveryOperation, receipt.providerMessageId, context.env);
-    await adminBoundary.completeReel(payload.reelId, "rendered", payload.renderedAssetId, receipt.providerMessageId, context.env);
-    return context.json({ delivered: true, reelId: payload.reelId, renderedAssetId: payload.renderedAssetId, providerMessageId: receipt.providerMessageId }, 201);
+    const claim = await adminBoundary.beginReelDelivery({
+      reelId: payload.reelId, merchantId: recipientTenant.merchantId,
+      renderedAssetId: payload.renderedAssetId, recipientHash: recipientTenant.ownerWaIdHash,
+    }, context.env);
+    if (!claim.claimed) {
+      if (claim.status === "delivered") return context.json({ delivered: true, replay: true, reelId: payload.reelId, renderedAssetId: payload.renderedAssetId, providerMessageId: claim.providerMessageId }, 200);
+      if (claim.status === "delivering") return context.json({ delivered: false, replay: true, stage: "delivery_in_progress" }, 202);
+      return context.json({ delivered: false, replay: true, stage: "delivery_failed" }, 409);
+    }
+    try {
+      const media = await uploadMetaMedia({
+        graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
+        accessToken: context.env.META_ACCESS_TOKEN, bytes: object.body, contentType, filename: `${payload.reelId}.mp4`,
+      });
+      const receipt = await sendVideoByMediaId({
+        graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
+        accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: payload.recipientWaId, mediaId: media.mediaId, caption: payload.caption,
+      });
+      await recordOutboundMessage(recipientTenant.merchantId, deliveryOperation, receipt.providerMessageId, context.env);
+      await adminBoundary.finishReelDelivery({ reelId: payload.reelId, status: "delivered", providerMessageId: receipt.providerMessageId }, context.env);
+      return context.json({ delivered: true, reelId: payload.reelId, renderedAssetId: payload.renderedAssetId, providerMessageId: receipt.providerMessageId }, 201);
+    } catch {
+      await adminBoundary.finishReelDelivery({ reelId: payload.reelId, status: "delivery_failed", failureCode: "meta_provider_failure" }, context.env);
+      return context.json({ delivered: false, stage: "delivery_failed" }, 502);
+    }
   });
   app.post("/internal/action-required", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);

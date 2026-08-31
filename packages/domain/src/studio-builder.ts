@@ -1,5 +1,6 @@
 import { BusinessBriefSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type BusinessType, type ReelPlanV1, type SiteSpecV2 } from "./growth";
 import { StudioProjectInputSchema, type StudioProjectInput } from "./studio";
+import { resolveReelSignals, type ReelSignal, type ReelSignalResolution } from "./reel-signals";
 
 export type StudioOwnerIdentity = { merchantId: string; ownerWaIdHash: string };
 export type MissingStudioFact = "orderWhatsAppNumber" | "fulfillmentArea" | "leadTime" | "offerings" | "referenceAssetIds";
@@ -186,7 +187,11 @@ const reelAngleByTemplate = {
   post_highlight: "Question + answer",
 } as const;
 
-export function buildStudioReelPlan(input: unknown, owner: StudioOwnerIdentity): { plan: ReelPlanV1; suggestions: string[] } {
+export function buildStudioReelPlan(
+  input: unknown,
+  owner: StudioOwnerIdentity,
+  signalInput: { signals: ReelSignal[]; now: number } = { signals: [], now: Date.now() },
+): { plan: ReelPlanV1; recommendations: ReelSignalResolution } {
   const project = StudioProjectInputSchema.parse(input);
   if (project.intent === "website") throw new Error("website-only projects do not contain a reel");
   if (!project.projectId || !project.reelTemplate || !project.layerOverrides) throw new Error("reel format and editable layers are required");
@@ -194,7 +199,7 @@ export function buildStudioReelPlan(input: unknown, owner: StudioOwnerIdentity):
   if (!assets.length) throw new MissingStudioFactsError(["referenceAssetIds"]);
   const overlays = [project.layerOverrides.hook, project.layerOverrides.proof, project.layerOverrides.cta];
   const angle = reelAngleByTemplate[project.reelTemplate];
-  const suggestions = [angle, "Behind the scenes", "Customer question answered"];
+  const recommendations = resolveReelSignals(signalInput.signals, signalInput.now);
   const reelId = `reel-${slugify(project.projectId, "studio-project")}`.slice(0, 64).replace(/-+$/g, "");
   const plan = ReelPlanSchema.parse({
     schemaVersion: 1,
@@ -209,5 +214,5 @@ export function buildStudioReelPlan(input: unknown, owner: StudioOwnerIdentity):
     claims: project.suppliedClaims,
     status: "draft",
   });
-  return { plan, suggestions };
+  return { plan, recommendations };
 }

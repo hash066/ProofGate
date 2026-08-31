@@ -40,9 +40,34 @@ a confirmation email for the SNS subscription; alerts will not reach that addres
 the operator confirms it.
 
 After deployment, record the returned `MerchantMediaBucket`, `RecordingsBucket`, and
-`OperationsAlertTopicArn`. Verify all five alarms have actions enabled and remain `OK`,
+`MerchantMediaCapabilitySecretArn` plus `OperationsAlertTopicArn`. Verify all five alarms have actions enabled and remain `OK`,
 send one controlled SNS test notification, and confirm its delivery. Do not manufacture a
 DLQ event in production merely to test alerting.
+
+## Private merchant-media upload boundary
+
+The stack provides a bounded direct-upload facade at `POST /merchant-media/capabilities`
+and `POST /merchant-media/finalize`. Only an authenticated Axcas server may call these
+routes. It HMAC-signs the exact timestamp and JSON body with the separate secret referenced
+by `MerchantMediaCapabilitySecretArn`; that secret must stay in a server-only Cloudflare
+binding and must never be sent to Studio, WhatsApp, Hermes, or customer JavaScript.
+
+An issue request binds one merchant ID and asset ID to the expected SHA-256 digest, byte
+length, supported content type, and provider message ID. AWS returns a five-minute S3 PUT
+capability whose signature also binds content length, type, checksum, and AES-256 server-side
+encryption. The customer receives no AWS access key and the bucket has no public read path.
+Studio may PUT the exact bytes using only the returned URL and required headers, then the
+authenticated server finalizes the capability. Finalization performs a consistent tenant
+lookup and S3 metadata/checksum check before recording one immutable registration. A wrong
+upload is deleted and never registered; retries and concurrent finalization are idempotent.
+
+This first safe path is deliberately a single PUT, not multipart or resumable upload. Images
+are capped at 20 MiB, audio at 30 MiB, and MP4 video at 100 MiB. An interrupted upload must
+request a new five-minute capability and retry the complete object. Before switching live
+traffic from Convex storage, wire the typed server client to the authenticated Worker asset
+registration path and prove one real browser upload, checksum finalization, private read,
+and deletion. Publishing selected media remains a separate deterministic release action;
+the upload Lambda has no release or `published/` write authority.
 
 The host pins the signed Hermes `v2026.7.7.2` release (`v0.18.2`) at commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`. Do not use the old `fb402106` pin: inspection shows that commit contains `v0.20.0`.
 

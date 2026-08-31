@@ -45,21 +45,24 @@ $deployArguments = @(
   "--region", $Region,
   "--no-fail-on-empty-changeset"
 )
+$stackParameters = @("ParameterKey=StudioOrigin,ParameterValue=$($AdminUrl.TrimEnd('/'))")
 if ($OperatorAlertEmail) {
-  $deployArguments += @("--parameter-overrides", "ParameterKey=OperatorAlertEmail,ParameterValue=$OperatorAlertEmail")
+  $stackParameters += "ParameterKey=OperatorAlertEmail,ParameterValue=$OperatorAlertEmail"
 }
+$deployArguments += @("--parameter-overrides") + $stackParameters
 & aws @deployArguments
 if ($LASTEXITCODE -ne 0) { throw "CloudFormation deployment failed." }
 
 $instanceId = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text
 $bucket = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RecordingsBucketName'].OutputValue" --output text
 $merchantMediaBucket = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='MerchantMediaBucketName'].OutputValue" --output text
+$merchantMediaSecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='MerchantMediaCapabilitySecretArn'].OutputValue" --output text
 $operationsTopicArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='OperationsAlertTopicArn'].OutputValue" --output text
 $relayOrigin = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayOriginUrl'].OutputValue" --output text
 $relayQueue = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayQueueUrl'].OutputValue" --output text
 $relaySecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelaySecretArn'].OutputValue" --output text
 $adminSecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='AdminSecretArn'].OutputValue" --output text
-if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or [string]::IsNullOrWhiteSpace($merchantMediaBucket) -or $operationsTopicArn -notmatch '^arn:' -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:' -or $adminSecretArn -notmatch '^arn:') {
+if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or [string]::IsNullOrWhiteSpace($merchantMediaBucket) -or $merchantMediaSecretArn -notmatch '^arn:' -or $operationsTopicArn -notmatch '^arn:' -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:' -or $adminSecretArn -notmatch '^arn:') {
   throw "Stack outputs are incomplete."
 }
 
@@ -101,6 +104,7 @@ if ($LASTEXITCODE -ne 0 -or $status -ne "Success") { throw "Runtime installation
   InstanceId = $instanceId
   RecordingsBucket = $bucket
   MerchantMediaBucket = $merchantMediaBucket
+  MerchantMediaCapabilitySecretArn = $merchantMediaSecretArn
   OperationsAlertTopicArn = $operationsTopicArn
   RelayOriginUrl = $relayOrigin
   RelayQueueUrl = $relayQueue

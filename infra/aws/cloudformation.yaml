@@ -10,6 +10,11 @@ Parameters:
     Description: Optional operator email for CloudWatch alarm notifications; confirmation is required.
     AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
     ConstraintDescription: Must be empty or a valid operator email address.
+  StudioOrigin:
+    Type: String
+    Default: https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev
+    AllowedPattern: '^https://[a-z0-9.-]+\.workers\.dev$'
+    Description: Exact Axcas Studio origin allowed to PUT with short-lived signed capabilities.
 Conditions:
   HasOperatorAlertEmail: !Not [!Equals [!Ref OperatorAlertEmail, '']]
 Resources:
@@ -239,6 +244,312 @@ Resources:
       FunctionName: !Ref HermesRelayFunction
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HermesRelayApi}/*/*'
+  MerchantMediaCapabilitySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Worker-to-AWS merchant-media capability request signing secret
+      GenerateSecretString:
+        ExcludePunctuation: true
+        PasswordLength: 64
+  MerchantMediaCapabilityTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: assetScope
+          AttributeType: S
+      KeySchema:
+        - AttributeName: assetScope
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresTtl
+        Enabled: true
+  MerchantMediaFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: AxcasMerchantMediaUploadFacade
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [secretsmanager:GetSecretValue]
+                Resource: !Ref MerchantMediaCapabilitySecret
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: !GetAtt MerchantMediaCapabilityTable.Arn
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource:
+                  - !Sub '${MerchantMediaBucket.Arn}/private/ingest/*'
+  MerchantMediaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Issues tenant-bound signed S3 PUTs and immutably finalizes verified merchant assets
+      Handler: index.handler
+      MemorySize: 256
+      Role: !GetAtt MerchantMediaFunctionRole.Arn
+      Runtime: python3.12
+      Timeout: 15
+      Environment:
+        Variables:
+          MEDIA_BUCKET: !Ref MerchantMediaBucket
+          MEDIA_CAPABILITY_TABLE: !Ref MerchantMediaCapabilityTable
+          MEDIA_SECRET_ARN: !Ref MerchantMediaCapabilitySecret
+      Code:
+        ZipFile: |
+          import base64
+          import boto3
+          import hashlib
+          import hmac
+          import json
+          import os
+          import re
+          import time
+          import uuid
+          from botocore.exceptions import ClientError
+
+          s3 = boto3.client("s3")
+          secret_store = boto3.client("secretsmanager")
+          table = boto3.resource("dynamodb").Table(os.environ["MEDIA_CAPABILITY_TABLE"])
+          cached_secret = None
+          allowed_types = {
+              "image/jpeg": 20 * 1024 * 1024,
+              "image/png": 20 * 1024 * 1024,
+              "image/webp": 20 * 1024 * 1024,
+              "video/mp4": 100 * 1024 * 1024,
+              "audio/mpeg": 30 * 1024 * 1024,
+              "audio/ogg": 30 * 1024 * 1024,
+          }
+
+          def reply(status, body):
+              return {
+                  "statusCode": status,
+                  "headers": {"content-type": "application/json", "cache-control": "no-store"},
+                  "body": json.dumps(body, separators=(",", ":")),
+              }
+
+          def raw_body(event):
+              value = event.get("body") or ""
+              return base64.b64decode(value, validate=True) if event.get("isBase64Encoded") else value.encode("utf-8")
+
+          def signing_secret(refresh=False):
+              global cached_secret
+              if refresh or cached_secret is None:
+                  cached_secret = secret_store.get_secret_value(SecretId=os.environ["MEDIA_SECRET_ARN"])["SecretString"]
+              return cached_secret
+
+          def authenticated(headers, body, now, refresh=False):
+              timestamp = headers.get("x-axcas-media-timestamp", "")
+              signature = headers.get("x-axcas-media-signature", "")
+              if not re.fullmatch(r"[0-9]{10}", timestamp) or abs(now - int(timestamp)) > 300:
+                  return False
+              if not re.fullmatch(r"sha256=[a-f0-9]{64}", signature):
+                  return False
+              expected = hmac.new(signing_secret(refresh).encode("utf-8"), timestamp.encode("ascii") + b"." + body, hashlib.sha256).hexdigest()
+              return hmac.compare_digest(signature, "sha256=" + expected)
+
+          def parse_issue(payload):
+              expected = {"schemaVersion", "merchantId", "assetId", "sha256", "byteLength", "contentType", "sourceProviderMessageId"}
+              if not isinstance(payload, dict) or set(payload) != expected or payload.get("schemaVersion") != 1:
+                  raise ValueError("invalid_request")
+              merchant_id = payload.get("merchantId")
+              asset_id = payload.get("assetId")
+              digest = payload.get("sha256")
+              content_type = payload.get("contentType")
+              byte_length = payload.get("byteLength")
+              source_id = payload.get("sourceProviderMessageId")
+              if not isinstance(merchant_id, str) or not re.fullmatch(r"[a-z0-9-]{3,64}", merchant_id):
+                  raise ValueError("invalid_request")
+              if not isinstance(asset_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,128}", asset_id):
+                  raise ValueError("invalid_request")
+              if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+                  raise ValueError("invalid_request")
+              if content_type not in allowed_types or not isinstance(byte_length, int) or isinstance(byte_length, bool) or byte_length < 1 or byte_length > allowed_types[content_type]:
+                  raise ValueError("invalid_request")
+              if not isinstance(source_id, str) or not 3 <= len(source_id) <= 256:
+                  raise ValueError("invalid_request")
+              return merchant_id, asset_id, digest, byte_length, content_type, source_id
+
+          def registration(item):
+              return {
+                  "status": "registered",
+                  "storageBackend": "s3",
+                  "assetId": item["assetId"],
+                  "merchantId": item["merchantId"],
+                  "objectKey": item["objectKey"],
+                  "sha256": item["sha256"],
+                  "byteLength": int(item["byteLength"]),
+                  "contentType": item["contentType"],
+                  "sourceProviderMessageId": item["sourceProviderMessageId"],
+              }
+
+          def issue(payload, now):
+              merchant_id, asset_id, digest, byte_length, content_type, source_id = parse_issue(payload)
+              scope = merchant_id + ":" + asset_id
+              object_key = f"private/ingest/{merchant_id}/{asset_id}/{digest}"
+              existing = table.get_item(Key={"assetScope": scope}, ConsistentRead=True).get("Item")
+              if existing:
+                  bound = (existing.get("sha256"), int(existing.get("byteLength", 0)), existing.get("contentType"), existing.get("sourceProviderMessageId"))
+                  if bound != (digest, byte_length, content_type, source_id):
+                      return reply(409, {"error": "immutable_conflict"})
+                  if existing.get("status") == "registered":
+                      return reply(200, registration(existing))
+                  capability_id = existing["capabilityId"]
+                  expires_at = int(existing["expiresAt"])
+                  if expires_at <= now:
+                      capability_id = str(uuid.uuid4())
+                      expires_at = now + 300
+                      table.update_item(
+                          Key={"assetScope": scope},
+                          UpdateExpression="SET capabilityId=:cap, expiresAt=:expiry, expiresTtl=:ttl",
+                          ConditionExpression="#status=:issued AND sha256=:sha",
+                          ExpressionAttributeNames={"#status": "status"},
+                          ExpressionAttributeValues={":cap": capability_id, ":expiry": expires_at, ":ttl": expires_at + 3600, ":issued": "issued", ":sha": digest},
+                      )
+              else:
+                  capability_id = str(uuid.uuid4())
+                  expires_at = now + 300
+                  item = {
+                      "assetScope": scope, "capabilityId": capability_id, "status": "issued",
+                      "merchantId": merchant_id, "assetId": asset_id, "sha256": digest,
+                      "byteLength": byte_length, "contentType": content_type,
+                      "sourceProviderMessageId": source_id, "objectKey": object_key,
+                      "expiresAt": expires_at, "expiresTtl": expires_at + 3600,
+                  }
+                  try:
+                      table.put_item(Item=item, ConditionExpression="attribute_not_exists(assetScope)")
+                  except ClientError as error:
+                      if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+                          return reply(409, {"error": "capability_conflict", "retryable": True})
+                      raise
+              checksum = base64.b64encode(bytes.fromhex(digest)).decode("ascii")
+              put = {
+                  "Bucket": os.environ["MEDIA_BUCKET"], "Key": object_key,
+                  "ContentType": content_type, "ContentLength": byte_length,
+                  "ChecksumSHA256": checksum, "ServerSideEncryption": "AES256",
+              }
+              upload_url = s3.generate_presigned_url("put_object", Params=put, ExpiresIn=max(1, expires_at - now), HttpMethod="PUT")
+              return reply(201, {
+                  "status": "upload_ready", "capabilityId": capability_id,
+                  "expiresAt": expires_at, "expiresInSeconds": max(1, expires_at - now),
+                  "uploadUrl": upload_url, "requiredByteLength": byte_length,
+                  "requiredHeaders": {
+                      "content-type": content_type,
+                      "x-amz-checksum-sha256": checksum,
+                      "x-amz-server-side-encryption": "AES256",
+                  },
+              })
+
+          def finalize(payload, now):
+              expected = {"schemaVersion", "merchantId", "assetId", "capabilityId"}
+              if not isinstance(payload, dict) or set(payload) != expected or payload.get("schemaVersion") != 1:
+                  return reply(400, {"error": "invalid_request"})
+              merchant_id, asset_id, capability_id = payload.get("merchantId"), payload.get("assetId"), payload.get("capabilityId")
+              if not isinstance(merchant_id, str) or not re.fullmatch(r"[a-z0-9-]{3,64}", merchant_id) or not isinstance(asset_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,128}", asset_id) or not isinstance(capability_id, str) or not re.fullmatch(r"[a-f0-9-]{36}", capability_id):
+                  return reply(400, {"error": "invalid_request"})
+              scope = merchant_id + ":" + asset_id
+              item = table.get_item(Key={"assetScope": scope}, ConsistentRead=True).get("Item")
+              if not item or item.get("capabilityId") != capability_id or item.get("merchantId") != merchant_id or item.get("assetId") != asset_id:
+                  return reply(404, {"error": "capability_not_found"})
+              if item.get("status") == "registered":
+                  return reply(200, registration(item))
+              if item.get("status") != "issued" or int(item.get("expiresAt", 0)) < now:
+                  return reply(410, {"error": "capability_expired"})
+              try:
+                  head = s3.head_object(Bucket=os.environ["MEDIA_BUCKET"], Key=item["objectKey"], ChecksumMode='ENABLED')
+              except ClientError as error:
+                  if error.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                      return reply(409, {"error": "upload_incomplete", "retryable": True})
+                  raise
+              expected_checksum = base64.b64encode(bytes.fromhex(item["sha256"])).decode("ascii")
+              valid = int(head.get("ContentLength", -1)) == int(item["byteLength"]) and head.get("ContentType") == item["contentType"] and head.get("ChecksumSHA256") == expected_checksum and head.get("ServerSideEncryption") == "AES256"
+              if not valid:
+                  s3.delete_object(Bucket=os.environ["MEDIA_BUCKET"], Key=item["objectKey"])
+                  return reply(422, {"error": "upload_mismatch"})
+              try:
+                  completed = table.update_item(
+                      Key={"assetScope": scope},
+                      UpdateExpression="SET #status=:registered, completedAt=:now REMOVE expiresTtl",
+                      ConditionExpression="#status=:issued AND capabilityId=:cap",
+                      ExpressionAttributeNames={"#status": "status"},
+                      ExpressionAttributeValues={":registered": "registered", ":issued": "issued", ":cap": capability_id, ":now": now},
+                      ReturnValues="ALL_NEW",
+                  )["Attributes"]
+              except ClientError as error:
+                  if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                      raise
+                  completed = table.get_item(Key={"assetScope": scope}, ConsistentRead=True).get("Item")
+                  if not completed or completed.get("status") != "registered" or completed.get("capabilityId") != capability_id:
+                      raise
+              return reply(200, registration(completed))
+
+          def handler(event, context):
+              try:
+                  body = raw_body(event)
+                  if not body or len(body) > 32768:
+                      return reply(413, {"error": "invalid_size"})
+                  headers = {str(key).lower(): str(value) for key, value in (event.get("headers") or {}).items()}
+                  now = int(time.time())
+                  if not authenticated(headers, body, now) and not authenticated(headers, body, now, True):
+                      return reply(401, {"error": "unauthorized"})
+                  try:
+                      payload = json.loads(body.decode("utf-8"))
+                  except Exception:
+                      return reply(400, {"error": "invalid_request"})
+                  path = event.get("rawPath", "")
+                  method = event.get("requestContext", {}).get("http", {}).get("method", "")
+                  if method == "POST" and path == "/merchant-media/capabilities":
+                      try:
+                          return issue(payload, now)
+                      except ValueError:
+                          return reply(400, {"error": "invalid_request"})
+                  if method == "POST" and path == "/merchant-media/finalize":
+                      return finalize(payload, now)
+                  return reply(404, {"error": "not_found"})
+              except Exception:
+                  print(json.dumps({"service": "axcas-merchant-media", "requestId": getattr(context, "aws_request_id", "unknown"), "outcome": "failed"}))
+                  return reply(500, {"error": "temporarily_unavailable"})
+  MerchantMediaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt MerchantMediaFunction.Arn
+      PayloadFormatVersion: '2.0'
+  MerchantMediaCapabilityRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      RouteKey: POST /merchant-media/capabilities
+      Target: !Join ['/', [integrations, !Ref MerchantMediaIntegration]]
+  MerchantMediaFinalizeRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HermesRelayApi
+      RouteKey: POST /merchant-media/finalize
+      Target: !Join ['/', [integrations, !Ref MerchantMediaIntegration]]
+  MerchantMediaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MerchantMediaFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HermesRelayApi}/*/POST/merchant-media/*'
   RecordingsBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -289,6 +600,13 @@ Resources:
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: [content-type, x-amz-checksum-sha256, x-amz-server-side-encryption]
+            AllowedMethods: [PUT]
+            AllowedOrigins: [!Ref StudioOrigin]
+            ExposedHeaders: [ETag, x-amz-checksum-sha256]
+            MaxAge: 300
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -487,6 +805,7 @@ Outputs:
   InstanceId: { Value: !Ref HermesHost }
   RecordingsBucketName: { Value: !Ref RecordingsBucket }
   MerchantMediaBucketName: { Value: !Ref MerchantMediaBucket }
+  MerchantMediaCapabilitySecretArn: { Value: !Ref MerchantMediaCapabilitySecret }
   OperationsAlertTopicArn: { Value: !Ref OperationsAlertTopic }
   RelayOriginUrl: { Value: !Sub 'https://${HermesRelayApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}' }
   RelayQueueUrl: { Value: !Ref HermesRelayQueue }

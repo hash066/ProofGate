@@ -43,8 +43,12 @@ function adminBoundary(): GrowthAdminBoundary {
     getPrivateAssetForMerchant: vi.fn(async (assetId: string) => assetId === "cake-1" ? { body: new Uint8Array([0xff, 0xd8, 0xff]), contentType: "image/jpeg", etag: "preview-etag" } : null),
     metrics: vi.fn(async () => ({ views: 10, clicks: 2, clickThroughRate: 0.2 })),
     claimCallBatch: vi.fn(async () => null),
+    updateCallAttempt: vi.fn(async () => ({ updated: true })),
+    registerCallArtifact: vi.fn(async () => ({ inserted: true })),
     claimReel: vi.fn(async () => null),
-    completeReel: vi.fn(async () => ({ completed: true })),
+    completeReel: vi.fn(async () => ({ completed: true, status: "rendered" as const, merchantId: "merchant-1234567890abcdef" })),
+    beginReelDelivery: vi.fn(async () => ({ claimed: true, status: "delivering" })),
+    finishReelDelivery: vi.fn(async () => ({ completed: true, status: "delivered" })),
     getReelStatus: vi.fn(async () => null),
     mintVerification: vi.fn(async () => ({ created: true })),
     createReleaseRequest: vi.fn(async () => ({ verificationRunId: "verify-1" })),
@@ -451,7 +455,7 @@ describe("growth Worker", () => {
     });
     expect(response.status).toBe(201);
     const result = await response.json() as any;
-    expect(result).toMatchObject({ stage: "approval_required", reelId: expect.stringMatching(/^reel-/), suggestions: ["Process + proof", "Behind the scenes", "Customer question answered"] });
+    expect(result).toMatchObject({ stage: "approval_required", reelId: expect.stringMatching(/^reel-/), recommendations: { status: "insufficient_signal", signals: [] } });
     expect(result.approval.checklist).toContain("not posted");
     expect(admin.registerReel).toHaveBeenCalledWith(expect.objectContaining({ status: "draft", scenes: expect.any(Array) }), expect.stringMatching(/^[a-f0-9]{64}$/), expect.stringMatching(/^approval-/), undefined);
     expect(admin.createApproval).toHaveBeenCalledWith(expect.objectContaining({ type: "reel" }), undefined);
@@ -952,6 +956,26 @@ describe("growth Worker", () => {
     expect(admin.createApproval).toHaveBeenCalledOnce();
   });
 
+  it("keeps provider call dispatch disabled until live acceptance explicitly opens the feature", async () => {
+    const admin = adminBoundary();
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/guardian", {
+      method: "POST", headers: { authorization: "Bearer service-secret", "content-type": "application/json" }, body: JSON.stringify({ kind: "calls" }),
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret", VAPI_API_KEY: "key", VAPI_PHONE_NUMBER_ID: "phone", VAPI_SQUAD_ID: "squad", PROOFGATE_DATA_KEY: btoa("12345678901234567890123456789012") });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ claimed: false, blocked: "calling_feature_not_live" });
+    expect(admin.claimCallBatch).not.toHaveBeenCalled();
+  });
+
+  it("rejects recording copy receipts unless spoken consent is granted", async () => {
+    const admin = adminBoundary();
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/call-artifact", {
+      method: "POST", headers: { authorization: "Bearer service-secret", "content-type": "application/json" },
+      body: JSON.stringify({ schemaVersion: 1, artifactId: "artifact-1", attemptId: "attempt-batch-1-lead-1", providerCallId: "call-1", recordingConsent: "declined", bucketKey: "calls/merchant-one/call-1.wav", sha256: "a".repeat(64), byteLength: 10, copiedAt: 1, expiresAt: 2 }),
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(response.status).toBe(400);
+    expect(admin.registerCallArtifact).not.toHaveBeenCalled();
+  });
+
   it("accepts verifier evidence only through a scoped opaque capability route", async () => {
     const growth = boundary();
     const response = await createApp(undefined, growth).request("http://proofgate.test/verification/pgv_123456789012345678901234", {
@@ -979,6 +1003,26 @@ describe("growth Worker", () => {
     expect(admin.promoteRelease).not.toHaveBeenCalled();
   });
 
+  it("accepts a verified render receipt and reconciles actual FFprobe and Polly usage", async () => {
+    const admin = adminBoundary();
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/reel-result", {
+      method: "POST",
+      headers: { authorization: "Bearer service-secret", "content-type": "application/json" },
+      body: JSON.stringify({
+        reelId: "reel-1", status: "rendered", renderedAssetId: "reel-output-1",
+        evidence: {
+          ffprobe: { width: 1080, height: 1920, videoCodec: "h264", audioCodec: "aac", durationSeconds: 15.02 },
+          polly: { voiceId: "Kajal", engine: "generative", characters: 42 },
+        },
+      }),
+    }, { PROOFGATE_SERVICE_SECRET: "service-secret" });
+    expect(response.status).toBe(200);
+    expect(admin.completeReel).toHaveBeenCalledWith(expect.objectContaining({ reelId: "reel-1", status: "rendered", renderEvidenceHash: expect.stringMatching(/^[a-f0-9]{64}$/) }), expect.anything());
+    expect(admin.recordActualUsage).toHaveBeenCalledTimes(2);
+    expect(admin.recordActualUsage).toHaveBeenCalledWith(expect.objectContaining({ metric: "render_seconds", quantity: 16, evidenceRef: expect.stringContaining("ffprobe") }), expect.anything());
+    expect(admin.recordActualUsage).toHaveBeenCalledWith(expect.objectContaining({ metric: "polly_characters", quantity: 42, evidenceRef: expect.stringContaining("polly") }), expect.anything());
+  });
+
   it("delivers a private rendered reel through Meta before recording completion", async () => {
     const admin = adminBoundary();
     const putObject = {
@@ -1002,10 +1046,35 @@ describe("growth Worker", () => {
       });
       expect(response.status).toBe(201);
       expect(await response.json()).toMatchObject({ delivered: true, providerMessageId: "wamid.reel-1" });
-      expect(admin.completeReel).toHaveBeenCalledWith("reel-1", "rendered", "reel-output-1", "wamid.reel-1", expect.anything());
+      expect((admin as any).finishReelDelivery).toHaveBeenCalledWith(expect.objectContaining({ reelId: "reel-1", status: "delivered", providerMessageId: "wamid.reel-1" }), expect.anything());
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("claims private reel delivery once so an identical replay sends no second WhatsApp message", async () => {
+    const admin = adminBoundary();
+    (admin as any).beginReelDelivery = vi.fn()
+      .mockResolvedValueOnce({ claimed: true, status: "delivering" })
+      .mockResolvedValueOnce({ claimed: false, status: "delivered", providerMessageId: "wamid.once" });
+    (admin as any).finishReelDelivery = vi.fn(async () => ({ completed: true, status: "delivered" }));
+    const providerFetch = vi.fn(async (url: string) => url.endsWith("/media")
+      ? new Response(JSON.stringify({ id: "media-once" }), { status: 200 })
+      : new Response(JSON.stringify({ messages: [{ id: "wamid.once" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    try {
+      const app = createApp(undefined, boundary(), admin);
+      const request = () => app.request("http://proofgate.test/internal/reel-delivery", {
+        method: "POST", headers: { authorization: "Bearer service-secret", "content-type": "application/json" },
+        body: JSON.stringify({ reelId: "reel-1", renderedAssetId: "reel-output-1", recipientWaId: "919876543210" }),
+      }, { PROOFGATE_SERVICE_SECRET: "service-secret", CONVEX_URL: "https://example.convex.cloud", META_PHONE_NUMBER_ID: "123", META_ACCESS_TOKEN: "token", META_GRAPH_API_VERSION: "v20.0" });
+      expect((await request()).status).toBe(201);
+      const replay = await request();
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toMatchObject({ delivered: true, replay: true, providerMessageId: "wamid.once" });
+      expect(providerFetch).toHaveBeenCalledTimes(2);
+      expect((admin as any).finishReelDelivery).toHaveBeenCalledOnce();
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it("delivers a Convex-backed private reel when R2 is unavailable", async () => {

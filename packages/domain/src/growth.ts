@@ -153,7 +153,7 @@ export const ReelPlanSchema = z.object({
   caption: safeText,
   cta: safeText,
   claims: z.array(safeText).max(12),
-  status: z.enum(["draft", "approved", "rendering", "rendered", "failed"]),
+  status: z.enum(["draft", "approved", "rendering", "rendered", "delivering", "delivered", "delivery_failed"]),
 }).refine((plan) => plan.scenes.reduce((total, scene) => total + scene.durationMs, 0) >= 12_000, {
   message: "reel must be at least 12 seconds",
 });

@@ -1,7 +1,8 @@
 import { ReelPlanSchema, type ReelPlanV1 } from "../../../packages/domain/src/growth";
+import { ReelRenderEvidenceSchema, type ReelRenderEvidence } from "../../../packages/domain/src/reel-evidence";
 
 type Fetcher = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-type RenderBoundary = (plan: ReelPlanV1, assets: Record<string, Uint8Array>) => Promise<Uint8Array>;
+type RenderBoundary = (plan: ReelPlanV1, assets: Record<string, Uint8Array>) => Promise<{ bytes: Uint8Array; evidence: ReelRenderEvidence }>;
 
 export type ReelGuardianOptions = { adminUrl: string; serviceSecret: string; fetcher?: Fetcher; render: RenderBoundary };
 
@@ -23,7 +24,9 @@ export async function runReelGuardianOnce(options: ReelGuardianOptions): Promise
       if (!response.ok || !(response.headers.get("content-type") ?? "").startsWith("image/")) throw new Error(`approved asset ${assetId} is unavailable`);
       assets[assetId] = new Uint8Array(await response.arrayBuffer());
     }
-    const output = await options.render(plan, assets);
+    const rendered = await options.render(plan, assets);
+    const output = rendered.bytes;
+    const evidence = ReelRenderEvidenceSchema.parse(rendered.evidence);
     if (output.byteLength === 0 || output.byteLength > 16 * 1024 * 1024) throw new Error("rendered reel size is invalid");
     const upload = await fetcher(`${origin.origin}/internal/rendered-assets/rendered-${plan.reelId}`, {
       method: "PUT", headers: { ...auth, "content-type": "video/mp4", "x-proofgate-merchant-id": plan.merchantId, "x-proofgate-source-message-id": `reel-guardian:${plan.reelId}` }, body: new Uint8Array(Array.from(output)).buffer,
@@ -31,11 +34,11 @@ export async function runReelGuardianOnce(options: ReelGuardianOptions): Promise
     if (!upload.ok) throw new Error(`render upload failed with HTTP ${upload.status}`);
     const uploaded = await upload.json() as { assetId?: string };
     if (!uploaded.assetId) throw new Error("render upload returned no asset ID");
-    const completed = await fetcher(`${origin.origin}/internal/reel-result`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ reelId: plan.reelId, status: "rendered", renderedAssetId: uploaded.assetId }) });
+    const completed = await fetcher(`${origin.origin}/internal/reel-result`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ reelId: plan.reelId, status: "rendered", renderedAssetId: uploaded.assetId, evidence }) });
     if (!completed.ok) throw new Error(`reel completion failed with HTTP ${completed.status}`);
     return { claimed: true, reelId: plan.reelId, renderedAssetId: uploaded.assetId };
   } catch (error) {
-    await fetcher(`${origin.origin}/internal/reel-result`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ reelId: plan.reelId, status: "failed" }) }).catch(() => undefined);
+    await fetcher(`${origin.origin}/internal/reel-result`, { method: "POST", headers: { ...auth, "content-type": "application/json" }, body: JSON.stringify({ reelId: plan.reelId, status: "delivery_failed", failureCode: "render_pipeline_failed" }) }).catch(() => undefined);
     return { claimed: true, reelId: plan.reelId, failed: true };
   }
 }

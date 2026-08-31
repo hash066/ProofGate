@@ -1,6 +1,6 @@
 import { PollyClient, SynthesizeSpeechCommand } from "@aws-sdk/client-polly";
 
-type PollySender = { send: (command: SynthesizeSpeechCommand) => Promise<{ AudioStream?: any }> };
+type PollySender = { send: (command: SynthesizeSpeechCommand) => Promise<{ AudioStream?: any; $metadata?: { requestId?: string } }> };
 
 export const proofGateVoices = [
   { voiceId: "Kajal", engine: "generative" },
@@ -23,7 +23,7 @@ export async function synthesizeReelVoiceover(input: {
   text: string;
   region: string;
   client?: PollySender;
-}): Promise<{ audio: Uint8Array; voiceId: "Kajal" | "Aditi"; engine: "generative" | "standard" }> {
+}): Promise<{ audio: Uint8Array; voiceId: "Kajal" | "Aditi"; engine: "generative" | "standard"; providerRequestId?: string }> {
   const text = input.text.trim();
   if (!text || text.length > 1500) throw new Error("voiceover must be between 1 and 1500 characters");
   const client = input.client ?? new PollyClient({ region: input.region });
@@ -37,7 +37,7 @@ export async function synthesizeReelVoiceover(input: {
         Engine: candidate.engine,
         LanguageCode: "en-IN",
       }));
-      return { audio: await audioBytes(response.AudioStream), ...candidate };
+      return { audio: await audioBytes(response.AudioStream), ...candidate, ...(response.$metadata?.requestId ? { providerRequestId: response.$metadata.requestId } : {}) };
     } catch (error) {
       lastError = error;
     }

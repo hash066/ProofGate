@@ -58,6 +58,7 @@ apps/edge-runtime/wrangler.jsonc`; never commit their values:
 - `HERMES_ORIGIN_URL`, `HERMES_PROXY_SECRET`
 - `PROOFGATE_SERVICE_SECRET`, `PROOFGATE_DATA_KEY`
 - `VAPI_API_KEY`, `VAPI_PHONE_NUMBER_ID`, `VAPI_SQUAD_ID`, `VAPI_WEBHOOK_SECRET`
+- `CALLING_LIVE_ENABLED` must remain unset/false until both consent paths pass live acceptance; set exactly `true` only for an approved launch.
 
 Optional names are `META_GRAPH_API_VERSION` and
 `META_ACTION_REQUIRED_TEMPLATE`. A Worker version/hostname may be recorded as a

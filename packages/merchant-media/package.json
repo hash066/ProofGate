@@ -1,0 +1,10 @@
+{
+  "name": "@axcas/merchant-media",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/client.ts",
+  "dependencies": {
+    "zod": "^4.3.6"
+  }
+}

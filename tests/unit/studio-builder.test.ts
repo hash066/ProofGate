@@ -82,6 +82,20 @@ describe("Studio website builder", () => {
     expect(result.plan.scenes).toHaveLength(3);
     expect(result.plan.scenes.reduce((sum, scene) => sum + scene.durationMs, 0)).toBe(15_000);
     expect(new Set(result.plan.scenes.map((scene) => scene.assetId))).toEqual(new Set(["merchant-photo-one", "merchant-photo-two"]));
-    expect(result.suggestions).toHaveLength(3);
+    expect(result.recommendations).toEqual({ status: "insufficient_signal", signals: [] });
+  });
+
+  it("uses dated provider signals without inventing trend claims", () => {
+    const now = Date.UTC(2026, 7, 31);
+    const result = buildStudioReelPlan({
+      projectId: "project-tailor-signal", intent: "reels", businessName: "Maya Studio",
+      description: "Custom blouse stitching in Bengaluru", reelTemplate: "split_explainer",
+      referenceAssetIds: ["merchant-photo-one"], siteAssetIds: ["merchant-photo-one"], suppliedClaims: [],
+      layerOverrides: { hook: "See the fit change", proof: "Measured locally", cta: "Message us", accent: "#fe5b3a", pacing: "fast" },
+    }, owner, {
+      now,
+      signals: [{ angle: "Fast measurement reveal", rationale: "Recent merchant completion signal", source: "merchant_instagram_insights", observedAt: now - 86_400_000, evidenceRef: "ig-insight:measurement-1" }],
+    });
+    expect(result.recommendations).toEqual({ status: "available", signals: [expect.objectContaining({ source: "merchant_instagram_insights", evidenceRef: "ig-insight:measurement-1" })] });
   });
 });

@@ -5,8 +5,9 @@ import path from "node:path";
 import type { ReelPlanV1 } from "../../../packages/domain/src/growth";
 import { synthesizeReelVoiceover } from "../../../packages/reels/src/polly";
 import { inspectReel, renderReel } from "../../reel-worker/src/render";
+import { ReelRenderEvidenceSchema, type ReelRenderEvidence } from "../../../packages/domain/src/reel-evidence";
 
-export async function renderApprovedReel(plan: ReelPlanV1, assets: Record<string, Uint8Array>): Promise<Uint8Array> {
+export async function renderApprovedReel(plan: ReelPlanV1, assets: Record<string, Uint8Array>): Promise<{ bytes: Uint8Array; evidence: ReelRenderEvidence }> {
   const root = await mkdtemp(path.join(tmpdir(), "axcas-guardian-"));
   try {
     const paths: Record<string, string> = {};
@@ -22,6 +23,15 @@ export async function renderApprovedReel(plan: ReelPlanV1, assets: Record<string
     await renderReel({ plan, assetPaths: paths, assetRoot: root, outputPath, voiceoverPath: voicePath });
     const probe = await inspectReel(outputPath);
     if (probe.width !== 1080 || probe.height !== 1920 || probe.videoCodec !== "h264" || probe.audioCodec !== "aac" || probe.durationSeconds < 12 || probe.durationSeconds > 18) throw new Error("render verification failed");
-    return new Uint8Array(await readFile(outputPath));
+    return {
+      bytes: new Uint8Array(await readFile(outputPath)),
+      evidence: ReelRenderEvidenceSchema.parse({
+        ffprobe: { ...probe, inspectedAt: Date.now() },
+        polly: {
+          voiceId: voice.voiceId, engine: voice.engine, characters: plan.voiceover.length,
+          ...(voice.providerRequestId ? { providerRequestId: voice.providerRequestId } : {}), synthesizedAt: Date.now(),
+        },
+      }),
+    };
   } finally { await rm(root, { recursive: true, force: true }); }
 }

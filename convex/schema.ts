@@ -340,8 +340,19 @@ export default defineSchema({
     .index("by_batch_id", ["batchId"])
     .index("by_merchant", ["merchantId"]),
 
+  callAttempts: defineTable({
+    attemptId: v.string(), batchId: v.string(), merchantId: v.string(), leadId: v.string(),
+    status: v.union(v.literal("pending"), v.literal("claimed"), v.literal("provider_created"), v.literal("completed"), v.literal("failed")),
+    providerCallId: v.optional(v.string()), failureCode: v.optional(v.string()), claimedAt: v.optional(v.number()), completedAt: v.optional(v.number()), createdAt: v.number(),
+  })
+    .index("by_attempt_id", ["attemptId"])
+    .index("by_provider_call_id", ["providerCallId"])
+    .index("by_batch", ["batchId"])
+    .index("by_batch_lead", ["batchId", "leadId"]),
+
   callOutcomes: defineTable({
     providerCallId: v.string(),
+    attemptId: v.string(),
     batchId: v.string(),
     leadId: v.string(),
     recordingConsent: v.union(v.literal("granted"), v.literal("declined"), v.literal("not_reached")),
@@ -358,6 +369,13 @@ export default defineSchema({
   })
     .index("by_provider_call_id", ["providerCallId"])
     .index("by_batch", ["batchId"]),
+
+  callRecordingArtifacts: defineTable({
+    artifactId: v.string(), attemptId: v.string(), providerCallId: v.string(), merchantId: v.string(),
+    bucketKey: v.string(), sha256: v.string(), byteLength: v.number(), copiedAt: v.number(), expiresAt: v.number(),
+  })
+    .index("by_artifact_id", ["artifactId"])
+    .index("by_provider_call_id", ["providerCallId"]),
 
   growthReleaseRequests: defineTable({
     requestId: v.string(),
@@ -382,9 +400,17 @@ export default defineSchema({
     planHash: v.string(),
     approvalId: v.optional(v.string()),
     renderedAssetId: v.optional(v.string()),
+    renderEvidenceJson: v.optional(v.string()),
+    renderEvidenceHash: v.optional(v.string()),
     deliveredProviderMessageId: v.optional(v.string()),
+    deliveryRecipientHash: v.optional(v.string()),
+    deliveryFailureCode: v.optional(v.string()),
+    deliveryStartedAt: v.optional(v.number()),
     deliveredAt: v.optional(v.number()),
-    status: v.union(v.literal("draft"), v.literal("approved"), v.literal("rendering"), v.literal("rendered"), v.literal("failed")),
+    status: v.union(
+      v.literal("draft"), v.literal("approved"), v.literal("rendering"), v.literal("rendered"),
+      v.literal("delivering"), v.literal("delivered"), v.literal("delivery_failed"),
+    ),
     createdAt: v.number(),
   })
     .index("by_reel_id", ["reelId"])

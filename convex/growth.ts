@@ -4,6 +4,8 @@ import { internal } from "./_generated/api";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { assertImmutableAssetRegistration, validateStoredAssetMetadata } from "./asset_policy";
 import { FOUNDING_BETA_PLAN, aggregateBillableUsage, evaluateQuota, usagePeriodStart, type UsageEntry, type UsageMetric } from "../packages/domain/src/usage";
+import { mustRevokeLead, recordingConsentFromVapi } from "../packages/calls/src/attempts";
+import { transitionReelLifecycle, type ReelLifecycleStatus } from "../packages/domain/src/reel-lifecycle";
 
 function requireServiceSecret(value: string) {
   const expected = process.env.PROOFGATE_SERVICE_SECRET;
@@ -477,6 +479,13 @@ export const resolveApprovalTap = mutation({
     if (!approval || approval.decision !== "pending" || approval.expiresAt < Date.now()) return { accepted: false };
     if (approval.ownerWaIdHash !== args.senderWaIdHash) return { accepted: false };
     await context.db.patch(approval._id, { decision: args.decision, decidedAt: Date.now(), providerMessageId: args.providerMessageId });
+    if (approval.type === "reel" && args.decision === "approved") {
+      const reel = (await context.db.query("reelPlans").collect()).find((entry) => entry.approvalId === approval.approvalId);
+      if (reel) {
+        const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "approve");
+        if (transition.applied) await context.db.patch(reel._id, { status: transition.status });
+      }
+    }
     return { accepted: true };
   },
 });
@@ -494,26 +503,29 @@ export const ingestVapiReport = mutation({
     const providerCallId = optionalString(message.call?.id);
     const batchId = optionalString(message.call?.metadata?.batchId);
     const leadId = optionalString(message.call?.metadata?.leadId);
-    if (!providerCallId || !batchId || !leadId) return { accepted: false };
-    const existing = await context.db.query("callOutcomes").withIndex("by_provider_call_id", (range) => range.eq("providerCallId", providerCallId)).unique();
-    if (existing) return { accepted: true };
+    const attemptId = optionalString(message.call?.metadata?.attemptId);
+    if (!providerCallId || !batchId || !leadId || !attemptId) return { accepted: false };
     const batch = await context.db.query("callBatches").withIndex("by_batch_id", (range) => range.eq("batchId", batchId)).unique();
     if (!batch || !batch.leadIds.includes(leadId)) return { accepted: false };
+    const attempt = await context.db.query("callAttempts").withIndex("by_attempt_id", (range) => range.eq("attemptId", attemptId)).unique();
+    if (!attempt || !["provider_created", "completed"].includes(attempt.status) || attempt.batchId !== batchId || attempt.leadId !== leadId || attempt.providerCallId !== providerCallId) return { accepted: false };
+    const existing = await context.db.query("callOutcomes").withIndex("by_provider_call_id", (range) => range.eq("providerCallId", providerCallId)).unique();
+    if (existing) return { accepted: existing.attemptId === attemptId && existing.batchId === batchId && existing.leadId === leadId };
     const structured = message.analysis?.structuredData ?? {};
-    const consent = message.compliance?.recordingConsent?.grantedAt ? "granted" : structured.recordingConsent === "declined" ? "declined" : "not_reached";
+    const consent = recordingConsentFromVapi({ grantedAt: message.compliance?.recordingConsent?.grantedAt, structuredConsent: structured.recordingConsent });
     const outcomeValues = new Set(["qualified", "not_interested", "no_answer", "failed", "do_not_call"]);
     const outcome = outcomeValues.has(structured.outcome) ? structured.outcome : "failed";
-    const doNotCall = Boolean(structured.doNotCall || outcome === "do_not_call");
+    const doNotCall = mustRevokeLead({ outcome, doNotCall: structured.doNotCall });
     const costUsd = typeof message.cost === "number" && message.cost >= 0 ? message.cost : 0;
     const completedAt = Number.isFinite(Date.parse(message.endedAt)) ? Date.parse(message.endedAt) : Date.now();
     await context.db.insert("callOutcomes", {
-      providerCallId, batchId, leadId, recordingConsent: consent, outcome,
+      providerCallId, attemptId, batchId, leadId, recordingConsent: consent, outcome,
       interest: optionalString(structured.interest), timing: optionalString(structured.timing), product: optionalString(structured.product),
       objection: optionalString(structured.objection), followUpRequested: Boolean(structured.followUpRequested), doNotCall,
       costUsd,
-      artifactRef: optionalString(message.call?.metadata?.artifactRef),
       completedAt,
     });
+    await context.db.patch(attempt._id, { status: "completed", completedAt });
     const outcomes = await context.db.query("callOutcomes").withIndex("by_batch", (range) => range.eq("batchId", batchId)).collect();
     const completedLeadIds = new Set(outcomes.map((entry) => entry.leadId));
     if (batch.leadIds.every((id) => completedLeadIds.has(id))) {
@@ -535,6 +547,28 @@ export const ingestVapiReport = mutation({
     }
     return { accepted: true };
   },
+});
+
+export const registerCallArtifactInternal = internalMutation({
+  args: { artifactId: v.string(), attemptId: v.string(), providerCallId: v.string(), bucketKey: v.string(), sha256: v.string(), byteLength: v.number(), copiedAt: v.number(), expiresAt: v.number() },
+  handler: async (context, args) => {
+    const existing = await context.db.query("callRecordingArtifacts").withIndex("by_artifact_id", (range) => range.eq("artifactId", args.artifactId)).unique();
+    if (existing) {
+      if (!Object.entries(args).every(([key, value]) => (existing as any)[key] === value)) throw new Error("recording artifact receipt is immutable");
+      return { inserted: false };
+    }
+    const attempt = await context.db.query("callAttempts").withIndex("by_attempt_id", (range) => range.eq("attemptId", args.attemptId)).unique();
+    const outcome = await context.db.query("callOutcomes").withIndex("by_provider_call_id", (range) => range.eq("providerCallId", args.providerCallId)).unique();
+    if (!attempt || !outcome || attempt.providerCallId !== args.providerCallId || outcome.attemptId !== args.attemptId || outcome.recordingConsent !== "granted") throw new Error("recording artifact requires granted consent and exact call binding");
+    if (!args.bucketKey.startsWith(`calls/${attempt.merchantId}/`) || !/^[a-f0-9]{64}$/.test(args.sha256) || !Number.isSafeInteger(args.byteLength) || args.byteLength <= 0 || args.expiresAt <= args.copiedAt || args.expiresAt - args.copiedAt > 30 * 86_400_000) throw new Error("invalid private recording copy receipt");
+    await context.db.insert("callRecordingArtifacts", { ...args, merchantId: attempt.merchantId });
+    return { inserted: true };
+  },
+});
+
+export const adminRegisterCallArtifact = action({
+  args: { serviceSecret: v.string(), artifactId: v.string(), attemptId: v.string(), providerCallId: v.string(), bucketKey: v.string(), sha256: v.string(), byteLength: v.number(), copiedAt: v.number(), expiresAt: v.number() },
+  handler: async (context, args): Promise<{ inserted: boolean }> => { requireServiceSecret(args.serviceSecret); const { serviceSecret: _secret, ...record } = args; return context.runMutation(internal.growth.registerCallArtifactInternal, record); },
 });
 
 export const metricsSummary = query({
@@ -722,6 +756,10 @@ export const resolveStudioApprovalInternal = internalMutation({
     if (approval.merchantId !== args.merchantId || approval.ownerWaIdHash !== args.ownerWaIdHash) return { accepted: false };
     await context.db.patch(approval._id, { decision: args.decision, decidedAt: args.now, providerMessageId: args.providerMessageId });
     const reel = approval.type === "reel" ? (await context.db.query("reelPlans").collect()).find((entry) => entry.approvalId === approval.approvalId) : undefined;
+    if (reel && args.decision === "approved") {
+      const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "approve");
+      if (transition.applied) await context.db.patch(reel._id, { status: transition.status });
+    }
     return { accepted: true as const, type: approval.type, reelId: reel?.reelId };
   },
 });
@@ -774,11 +812,20 @@ export const adminAttachApprovalMessage = action({
 export const createCallBatchInternal = internalMutation({
   args: { batchId: v.string(), merchantId: v.string(), scopeHash: v.string(), leadIds: v.array(v.string()), countries: v.array(v.union(v.literal("IN"), v.literal("US"))), scriptVersion: v.string(), earliestAt: v.number(), latestAt: v.number(), maxAttemptsPerLead: v.number(), costCapUsd: v.number(), approvalId: v.string(), createdAt: v.number() },
   handler: async (context, args) => {
+    const existingBatch = await context.db.query("callBatches").withIndex("by_batch_id", (range) => range.eq("batchId", args.batchId)).unique();
+    if (existingBatch) {
+      if (existingBatch.scopeHash !== args.scopeHash) throw new Error("immutable call batch conflict");
+      return { inserted: false };
+    }
     for (const leadId of args.leadIds) {
       const lead = await context.db.query("leadConsents").withIndex("by_lead_id", (range) => range.eq("leadId", leadId)).unique();
       if (!lead || lead.merchantId !== args.merchantId || lead.revokedAt || !args.countries.includes(lead.country)) throw new Error(`lead ${leadId} is not eligible`);
     }
     await context.db.insert("callBatches", args);
+    for (const leadId of args.leadIds) await context.db.insert("callAttempts", {
+      attemptId: `attempt-${args.batchId}-${leadId}`, batchId: args.batchId, merchantId: args.merchantId, leadId,
+      status: "pending", createdAt: args.createdAt,
+    });
     return { inserted: true };
   },
 });
@@ -961,20 +1008,29 @@ export const claimApprovedCallBatchInternal = internalMutation({
   handler: async (context, { now }) => {
     const batches = await context.db.query("callBatches").order("asc").collect();
     for (const batch of batches) {
-      if (batch.dispatchedAt || batch.earliestAt > now || batch.latestAt < now) continue;
+      if (batch.earliestAt > now || batch.latestAt < now) continue;
       const approval = await context.db.query("approvals").withIndex("by_approval_id", (range) => range.eq("approvalId", batch.approvalId)).unique();
       if (!approval || approval.type !== "call_batch" || approval.decision !== "approved" || approval.expiresAt < now || approval.scopeHash !== batch.scopeHash) continue;
-      const leads = [];
-      let eligible = true;
-      for (const leadId of batch.leadIds) {
-        const lead = await context.db.query("leadConsents").withIndex("by_lead_id", (range) => range.eq("leadId", leadId)).unique();
-        if (!lead || lead.merchantId !== batch.merchantId || lead.revokedAt || !batch.countries.includes(lead.country)) { eligible = false; break; }
-        leads.push({ leadId: lead.leadId, phoneCiphertext: lead.phoneCiphertext });
+      const attempts = await context.db.query("callAttempts").withIndex("by_batch", (range) => range.eq("batchId", batch.batchId)).collect();
+      // Legacy batches were marked dispatched before per-lead attempts existed; never replay them.
+      if (batch.dispatchedAt && !attempts.length) continue;
+      if (!attempts.length && batch.leadIds.length) {
+        for (const leadId of batch.leadIds) await context.db.insert("callAttempts", { attemptId: `attempt-${batch.batchId}-${leadId}`, batchId: batch.batchId, merchantId: batch.merchantId, leadId, status: "pending", createdAt: now });
+        continue;
       }
-      if (!eligible) continue;
-      // Claim before the provider call. A failed provider request is still the one allowed attempt.
-      await context.db.patch(batch._id, { dispatchedAt: now });
-      return { batchId: batch.batchId, earliestAt: batch.earliestAt, leads };
+      if (attempts.some((attempt) => attempt.status === "claimed" || attempt.status === "provider_created")) continue;
+      const spentMicrousd = (await context.db.query("callOutcomes").withIndex("by_batch", (range) => range.eq("batchId", batch.batchId)).collect()).reduce((sum, outcome) => sum + Math.round(outcome.costUsd * 1_000_000), 0);
+      const remainingCostMicrousd = Math.max(0, Math.round(batch.costCapUsd * 1_000_000) - spentMicrousd);
+      if (remainingCostMicrousd <= 0) continue;
+      const attempt = attempts.find((entry) => entry.status === "pending");
+      if (!attempt) {
+        if (!batch.dispatchedAt && attempts.every((entry) => entry.status === "completed" || entry.status === "failed")) await context.db.patch(batch._id, { dispatchedAt: now });
+        continue;
+      }
+      const lead = await context.db.query("leadConsents").withIndex("by_lead_id", (range) => range.eq("leadId", attempt.leadId)).unique();
+      if (!lead || lead.merchantId !== batch.merchantId || lead.revokedAt || !batch.countries.includes(lead.country)) { await context.db.patch(attempt._id, { status: "failed", failureCode: "lead_ineligible", completedAt: now }); continue; }
+      await context.db.patch(attempt._id, { status: "claimed", claimedAt: now });
+      return { attemptId: attempt.attemptId, batchId: batch.batchId, earliestAt: batch.earliestAt, leadId: lead.leadId, phoneCiphertext: lead.phoneCiphertext, remainingCostMicrousd };
     }
     return null;
   },
@@ -982,10 +1038,32 @@ export const claimApprovedCallBatchInternal = internalMutation({
 
 export const adminClaimApprovedCallBatch = action({
   args: { serviceSecret: v.string(), now: v.number() },
-  handler: async (context, args): Promise<null | { batchId: string; earliestAt: number; leads: Array<{ leadId: string; phoneCiphertext: string }> }> => {
+  handler: async (context, args): Promise<null | { attemptId: string; batchId: string; earliestAt: number; leadId: string; phoneCiphertext: string; remainingCostMicrousd: number }> => {
     requireServiceSecret(args.serviceSecret);
     return context.runMutation(internal.growth.claimApprovedCallBatchInternal, { now: args.now });
   },
+});
+
+export const updateCallAttemptInternal = internalMutation({
+  args: { attemptId: v.string(), providerCallId: v.optional(v.string()), status: v.union(v.literal("provider_created"), v.literal("failed")), failureCode: v.optional(v.string()), now: v.number() },
+  handler: async (context, args) => {
+    const attempt = await context.db.query("callAttempts").withIndex("by_attempt_id", (range) => range.eq("attemptId", args.attemptId)).unique();
+    if (!attempt) throw new Error("call attempt not found");
+    if (attempt.status === args.status && attempt.providerCallId === args.providerCallId) return { updated: false };
+    if (attempt.status !== "claimed") throw new Error("call attempt is not claimable");
+    if (args.status === "provider_created" && !args.providerCallId) throw new Error("provider call ID is required");
+    if (args.providerCallId) {
+      const bound = await context.db.query("callAttempts").withIndex("by_provider_call_id", (range) => range.eq("providerCallId", args.providerCallId)).unique();
+      if (bound && bound.attemptId !== args.attemptId) throw new Error("provider call ID already bound");
+    }
+    await context.db.patch(attempt._id, { status: args.status, providerCallId: args.providerCallId, failureCode: args.failureCode, completedAt: args.status === "failed" ? args.now : undefined });
+    return { updated: true };
+  },
+});
+
+export const adminUpdateCallAttempt = action({
+  args: { serviceSecret: v.string(), attemptId: v.string(), providerCallId: v.optional(v.string()), status: v.union(v.literal("provider_created"), v.literal("failed")), failureCode: v.optional(v.string()), now: v.number() },
+  handler: async (context, args): Promise<{ updated: boolean }> => { requireServiceSecret(args.serviceSecret); const { serviceSecret: _secret, ...record } = args; return context.runMutation(internal.growth.updateCallAttemptInternal, record); },
 });
 
 export const claimApprovedReelInternal = internalMutation({
@@ -993,10 +1071,11 @@ export const claimApprovedReelInternal = internalMutation({
   handler: async (context, { now }) => {
     const reels = await context.db.query("reelPlans").order("asc").collect();
     for (const reel of reels) {
-      if (reel.status !== "draft" || !reel.approvalId) continue;
+      if (reel.status !== "approved" || !reel.approvalId) continue;
       const approval = await context.db.query("approvals").withIndex("by_approval_id", (range) => range.eq("approvalId", reel.approvalId!)).unique();
       if (!approval || approval.type !== "reel" || approval.decision !== "approved" || approval.expiresAt < now || approval.scopeHash !== reel.planHash) continue;
-      await context.db.patch(reel._id, { status: "rendering" });
+      const transition = transitionReelLifecycle(reel.status, "claim_render");
+      await context.db.patch(reel._id, { status: transition.status });
       return { reelId: reel.reelId, planJson: reel.planJson, planHash: reel.planHash };
     }
     return null;
@@ -1012,22 +1091,115 @@ export const adminClaimApprovedReel = action({
 });
 
 export const completeReelInternal = internalMutation({
-  args: { reelId: v.string(), status: v.union(v.literal("rendered"), v.literal("failed")), renderedAssetId: v.optional(v.string()), deliveredProviderMessageId: v.optional(v.string()) },
+  args: {
+    reelId: v.string(), status: v.union(v.literal("rendered"), v.literal("delivery_failed")),
+    renderedAssetId: v.optional(v.string()), renderEvidenceJson: v.optional(v.string()), renderEvidenceHash: v.optional(v.string()),
+    failureCode: v.optional(v.string()),
+  },
   handler: async (context, args) => {
     const reel = await context.db.query("reelPlans").withIndex("by_reel_id", (range) => range.eq("reelId", args.reelId)).unique();
-    if (!reel || reel.status !== "rendering") throw new Error("claimed reel not found");
-    if (args.status === "rendered" && !args.renderedAssetId) throw new Error("rendered asset is required");
-    await context.db.patch(reel._id, { status: args.status, renderedAssetId: args.renderedAssetId, deliveredProviderMessageId: args.deliveredProviderMessageId, deliveredAt: args.deliveredProviderMessageId ? Date.now() : undefined });
-    return { completed: true };
+    if (!reel) throw new Error("claimed reel not found");
+    if (args.status === "rendered") {
+      if (!args.renderedAssetId || !args.renderEvidenceJson || !args.renderEvidenceHash) throw new Error("rendered asset and evidence are required");
+      if (["rendered", "delivering", "delivered", "delivery_failed"].includes(reel.status)) {
+        if (reel.renderedAssetId !== args.renderedAssetId || reel.renderEvidenceHash !== args.renderEvidenceHash) throw new Error("immutable reel render receipt conflict");
+        return { completed: false, status: reel.status, merchantId: reel.merchantId };
+      }
+      const asset = await context.db.query("mediaAssets").withIndex("by_asset_id", (range) => range.eq("assetId", args.renderedAssetId!)).unique();
+      if (!asset || asset.merchantId !== reel.merchantId || asset.contentType !== "video/mp4") throw new Error("rendered reel asset is not tenant-owned MP4 media");
+      const plan = JSON.parse(reel.planJson) as { voiceover?: string; scenes?: Array<{ durationMs?: number }> };
+      const evidence = JSON.parse(args.renderEvidenceJson) as { ffprobe?: { durationSeconds?: number }; polly?: { characters?: number } };
+      const plannedSeconds = plan.scenes?.reduce((total, scene) => total + (scene.durationMs ?? 0), 0) ?? 0;
+      if (evidence.polly?.characters !== plan.voiceover?.length || Math.abs((evidence.ffprobe?.durationSeconds ?? -1) - plannedSeconds / 1000) > 0.75) {
+        throw new Error("render evidence does not match the approved reel plan");
+      }
+      const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "render_succeeded");
+      await context.db.patch(reel._id, {
+        status: transition.status, renderedAssetId: args.renderedAssetId,
+        renderEvidenceJson: args.renderEvidenceJson, renderEvidenceHash: args.renderEvidenceHash,
+      });
+      return { completed: true, status: transition.status, merchantId: reel.merchantId };
+    }
+    if (!args.failureCode) throw new Error("reel failure code is required");
+    if (reel.status === "delivery_failed") return { completed: false, status: reel.status, merchantId: reel.merchantId };
+    const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "delivery_failed");
+    await context.db.patch(reel._id, { status: transition.status, deliveryFailureCode: args.failureCode });
+    return { completed: true, status: transition.status, merchantId: reel.merchantId };
   },
 });
 
 export const adminCompleteReel = action({
-  args: { serviceSecret: v.string(), reelId: v.string(), status: v.union(v.literal("rendered"), v.literal("failed")), renderedAssetId: v.optional(v.string()), deliveredProviderMessageId: v.optional(v.string()) },
-  handler: async (context, args): Promise<{ completed: boolean }> => {
+  args: {
+    serviceSecret: v.string(), reelId: v.string(), status: v.union(v.literal("rendered"), v.literal("delivery_failed")),
+    renderedAssetId: v.optional(v.string()), renderEvidenceJson: v.optional(v.string()), renderEvidenceHash: v.optional(v.string()),
+    failureCode: v.optional(v.string()),
+  },
+  handler: async (context, args): Promise<{ completed: boolean; status: string; merchantId: string }> => {
     requireServiceSecret(args.serviceSecret);
     const { serviceSecret: _secret, ...record } = args;
     return context.runMutation(internal.growth.completeReelInternal, record);
+  },
+});
+
+export const beginReelDeliveryInternal = internalMutation({
+  args: { reelId: v.string(), merchantId: v.string(), renderedAssetId: v.string(), recipientHash: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    const reel = await context.db.query("reelPlans").withIndex("by_reel_id", (range) => range.eq("reelId", args.reelId)).unique();
+    if (!reel || reel.merchantId !== args.merchantId || reel.renderedAssetId !== args.renderedAssetId) throw new Error("rendered reel delivery scope mismatch");
+    if (reel.status === "delivered" || reel.status === "delivering" || reel.status === "delivery_failed") {
+      if (reel.deliveryRecipientHash !== args.recipientHash) throw new Error("immutable reel recipient conflict");
+      return { claimed: false, status: reel.status, providerMessageId: reel.deliveredProviderMessageId };
+    }
+    const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "begin_delivery");
+    await context.db.patch(reel._id, { status: transition.status, deliveryRecipientHash: args.recipientHash, deliveryStartedAt: args.now });
+    return { claimed: true, status: transition.status };
+  },
+});
+
+export const adminBeginReelDelivery = action({
+  args: { serviceSecret: v.string(), reelId: v.string(), merchantId: v.string(), renderedAssetId: v.string(), recipientHash: v.string(), now: v.number() },
+  handler: async (context, args): Promise<{ claimed: boolean; status: string; providerMessageId?: string }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.beginReelDeliveryInternal, record);
+  },
+});
+
+export const finishReelDeliveryInternal = internalMutation({
+  args: {
+    reelId: v.string(), status: v.union(v.literal("delivered"), v.literal("delivery_failed")),
+    providerMessageId: v.optional(v.string()), failureCode: v.optional(v.string()), now: v.number(),
+  },
+  handler: async (context, args) => {
+    const reel = await context.db.query("reelPlans").withIndex("by_reel_id", (range) => range.eq("reelId", args.reelId)).unique();
+    if (!reel) throw new Error("reel delivery not found");
+    if (args.status === "delivered") {
+      if (!args.providerMessageId) throw new Error("provider message receipt is required");
+      if (reel.status === "delivered") {
+        if (reel.deliveredProviderMessageId !== args.providerMessageId) throw new Error("immutable reel delivery receipt conflict");
+        return { completed: false, status: reel.status };
+      }
+      const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "delivery_succeeded");
+      await context.db.patch(reel._id, { status: transition.status, deliveredProviderMessageId: args.providerMessageId, deliveredAt: args.now });
+      return { completed: true, status: transition.status };
+    }
+    if (!args.failureCode) throw new Error("delivery failure code is required");
+    if (reel.status === "delivery_failed") return { completed: false, status: reel.status };
+    const transition = transitionReelLifecycle(reel.status as ReelLifecycleStatus, "delivery_failed");
+    await context.db.patch(reel._id, { status: transition.status, deliveryFailureCode: args.failureCode });
+    return { completed: true, status: transition.status };
+  },
+});
+
+export const adminFinishReelDelivery = action({
+  args: {
+    serviceSecret: v.string(), reelId: v.string(), status: v.union(v.literal("delivered"), v.literal("delivery_failed")),
+    providerMessageId: v.optional(v.string()), failureCode: v.optional(v.string()), now: v.number(),
+  },
+  handler: async (context, args): Promise<{ completed: boolean; status: string }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.finishReelDeliveryInternal, record);
   },
 });
 
@@ -1037,7 +1209,7 @@ export const adminGetReelStatus = query({
     requireServiceSecret(args.serviceSecret);
     const reel = await context.db.query("reelPlans").withIndex("by_reel_id", (range) => range.eq("reelId", args.reelId)).unique();
     if (!reel || reel.merchantId !== args.merchantId) return null;
-    return { status: reel.status, renderedAssetId: reel.renderedAssetId };
+    return { status: reel.status, renderedAssetId: reel.renderedAssetId, providerMessageId: reel.deliveredProviderMessageId };
   },
 });
 
