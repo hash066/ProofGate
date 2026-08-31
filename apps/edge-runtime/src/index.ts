@@ -4,7 +4,8 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import { initialSpikeSiteSpec, SiteSpecSchema } from "../../../packages/domain/src/site-spec";
 import { BusinessBriefInputSchema, BusinessBriefSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type LeadConsentV1, type ReelPlanV1, type SiteSpecV2 } from "../../../packages/domain/src/growth";
-import { StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
+import { StudioIntakeInputSchema, StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
+import { CustomerOutboxMessageSchema, WorkflowProgressSchema, WorkflowStatusSchema, decodeProjectCursor, encodeProjectCursor, nextProjectCursor, type ProjectSyncCursor } from "../../../packages/domain/src/workflow";
 import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError, studioProjectFromBusinessBrief } from "../../../packages/domain/src/studio-builder";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
@@ -111,8 +112,12 @@ export type GrowthAdminBoundary = {
   completeStudioLink: (input: { linkId: string; browserNonceHash: string; sessionHash: string; sessionExpiresAt: number }, bindings?: Bindings) => Promise<{ status: "pending" | "expired" | "authenticated"; merchantId?: string; ownerWaIdHash?: string; intent?: StudioIntent }>;
   getStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ merchantId: string; ownerWaIdHash: string; expiresAt: number } | null>;
   revokeStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ revoked: boolean }>;
-  saveStudioProject: (input: { projectId: string; revisionId: string; parentRevisionId?: string; merchantId: string; intent: StudioIntent; project: StudioProjectInput }, bindings?: Bindings) => Promise<unknown>;
-  listStudioProjects: (merchantId: string, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; project: StudioProjectInput; createdAt: number }>>;
+  saveStudioProject: (input: { projectId: string; revisionId: string; parentRevisionId?: string; merchantId: string; intent: StudioIntent; source: "whatsapp" | "studio"; project: StudioProjectInput }, bindings?: Bindings) => Promise<{ inserted: boolean; conflict: boolean; headRevisionId?: string }>;
+  listStudioProjects: (merchantId: string, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; source: "whatsapp" | "studio"; project: StudioProjectInput; createdAt: number }>>;
+  listStudioProjectChanges: (merchantId: string, cursor: ProjectSyncCursor | undefined, limit: number, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; source: "whatsapp" | "studio"; project: StudioProjectInput; createdAt: number }>>;
+  beginInboundWorkflow: (input: { workflowId: string; merchantId: string; ownerWaIdHash: string; channel: "whatsapp_cloud"; providerMessageId: string }, bindings?: Bindings) => Promise<{ created: boolean; workflowId: string; status: string }>;
+  recordWorkflowProgress: (input: { workflowId: string; eventId: string; status: string; progress: string; projectId?: string; intent?: StudioIntent }, bindings?: Bindings) => Promise<{ inserted: boolean; status: string }>;
+  enqueueCustomerOutbox: (input: { outboxId: string; workflowId: string; merchantId: string; kind: "progress" | "missing_facts" | "approval" | "completion" | "retry"; body: string; dedupeKey: string }, bindings?: Bindings) => Promise<{ inserted: boolean; outboxId: string }>;
 };
 
 function canonicalize(value: unknown): string {
@@ -161,6 +166,20 @@ function cleanDimension(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const cleaned = value.trim().slice(0, 100);
   return /^[a-zA-Z0-9 _.-]+$/.test(cleaned) ? cleaned : undefined;
+}
+
+async function workflowIdForProviderMessage(providerMessageId: string): Promise<string> {
+  return `workflow-${(await sha256(providerMessageId)).slice(0, 32)}`;
+}
+
+function ordinaryMetaMessages(payload: unknown): Array<{ senderWaId: string; providerMessageId: string }> {
+  const result: Array<{ senderWaId: string; providerMessageId: string }> = [];
+  for (const entry of (payload as any)?.entry ?? []) for (const change of entry?.changes ?? []) for (const message of change?.value?.messages ?? []) {
+    if (typeof message?.from === "string" && /^\d{8,15}$/.test(message.from) && typeof message.id === "string" && message.id.length >= 3 && message.id.length <= 256) {
+      result.push({ senderWaId: message.from, providerMessageId: message.id });
+    }
+  }
+  return result;
 }
 
 async function sha256Bytes(value: Uint8Array): Promise<string> {
@@ -418,14 +437,34 @@ const liveAdminBoundary: GrowthAdminBoundary = {
   }),
   saveStudioProject: (input, bindings) => adminClient(bindings).action((api as any).growth.adminSaveStudioProject, {
     serviceSecret: serviceSecret(bindings), projectId: input.projectId, revisionId: input.revisionId,
-    parentRevisionId: input.parentRevisionId, merchantId: input.merchantId, intent: input.intent,
+    parentRevisionId: input.parentRevisionId, merchantId: input.merchantId, intent: input.intent, source: input.source,
     projectJson: JSON.stringify(input.project), createdAt: Date.now(),
   }),
   listStudioProjects: async (merchantId, bindings) => {
     const projects = await adminClient(bindings).query((api as any).growth.adminListStudioProjects, {
       serviceSecret: serviceSecret(bindings), merchantId,
-    }) as Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; projectJson: string; createdAt: number }>;
+    }) as Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; source: "whatsapp" | "studio"; projectJson: string; createdAt: number }>;
     return projects.map((project) => ({ ...project, project: StudioProjectInputSchema.parse(JSON.parse(project.projectJson)) }));
+  },
+  listStudioProjectChanges: async (merchantId, cursor, limit, bindings) => {
+    const projects = await adminClient(bindings).query((api as any).growth.adminListStudioProjectChanges, {
+      serviceSecret: serviceSecret(bindings), merchantId, afterCreatedAt: cursor?.createdAt ?? 0,
+      afterProjectId: cursor?.projectId ?? "---", afterRevisionId: cursor?.revisionId ?? "---", limit,
+    }) as Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; source: "whatsapp" | "studio"; projectJson: string; createdAt: number }>;
+    return projects.map((project) => ({ ...project, project: StudioProjectInputSchema.parse(JSON.parse(project.projectJson)) }));
+  },
+  beginInboundWorkflow: (input, bindings) => adminClient(bindings).action((api as any).growth.adminBeginInboundWorkflow, {
+    serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now(),
+  }),
+  recordWorkflowProgress: (input, bindings) => adminClient(bindings).action((api as any).growth.adminRecordWorkflowProgress, {
+    serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now(),
+  }),
+  enqueueCustomerOutbox: (input, bindings) => {
+    const message = CustomerOutboxMessageSchema.parse({ schemaVersion: 1, ...input, createdAt: Date.now() });
+    return adminClient(bindings).action((api as any).growth.adminEnqueueCustomerOutbox, {
+      serviceSecret: serviceSecret(bindings), outboxId: message.outboxId, workflowId: message.workflowId,
+      merchantId: message.merchantId, kind: message.kind, body: message.body, dedupeKey: message.dedupeKey, createdAt: message.createdAt,
+    });
   },
 };
 
@@ -531,7 +570,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
   }));
   app.get("/studio", (context) => context.html(renderStudio(context.env?.AXCAS_WHATSAPP_NUMBER), 200, {
     "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "content-security-policy": "default-src 'none'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "referrer-policy": "no-referrer", "x-content-type-options": "nosniff",
   }));
   app.get("/studio.css", (context) => context.body(`${renderStudioCss()}${STUDIO_RESPONSIVE_CSS}${STUDIO_ACCOUNT_CSS}`, 200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }));
@@ -584,7 +623,7 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     return context.json({
       authenticated: true,
       account: { method: "whatsapp", verified: true, displayName, sessionExpiresAt: session.expiresAt },
-      projects: projects.map((project) => ({ ...project, source: project.projectId.startsWith("project-whatsapp-") ? "whatsapp" : "studio" })),
+      projects: projects.map((project) => ({ ...project, source: project.source ?? (project.projectId.startsWith("project-whatsapp-") ? "whatsapp" : "studio") })),
     }, 200, { "cache-control": "no-store" });
   });
   app.post("/api/studio/logout", async (context) => {
@@ -600,6 +639,18 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!session) return context.text("Unauthorized", 401);
     return context.json({ projects: await adminBoundary.listStudioProjects(session.merchantId, context.env) }, 200, { "cache-control": "no-store" });
   });
+  app.get("/api/studio/projects/changes", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    let cursor: ProjectSyncCursor | undefined;
+    try { cursor = decodeProjectCursor(context.req.query("cursor")); } catch { return context.text("Invalid sync cursor", 400); }
+    const changes = await adminBoundary.listStudioProjectChanges(session.merchantId, cursor, 100, context.env);
+    let nextCursor = cursor;
+    for (const change of changes) nextCursor = nextProjectCursor(nextCursor, { createdAt: change.createdAt, projectId: change.projectId, revisionId: change.revisionId });
+    return context.json({ changes, cursor: nextCursor ? encodeProjectCursor(nextCursor) : undefined }, 200, {
+      "cache-control": "no-store",
+    });
+  });
   app.post("/api/studio/projects", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
     if (!session) return context.text("Unauthorized", 401);
@@ -608,7 +659,10 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     const projectId = project.projectId ?? `project-${crypto.randomUUID()}`;
     const revisionId = `revision-${crypto.randomUUID()}`;
     const stored = StudioProjectInputSchema.parse({ ...project, projectId });
-    const result = await adminBoundary.saveStudioProject({ projectId, revisionId, parentRevisionId: stored.parentRevisionId, merchantId: session.merchantId, intent: stored.intent, project: stored }, context.env);
+    const result = await adminBoundary.saveStudioProject({ projectId, revisionId, parentRevisionId: stored.parentRevisionId, merchantId: session.merchantId, intent: stored.intent, source: "studio", project: stored }, context.env);
+    if (result.conflict) return context.json({
+      conflict: true, projectId, submittedParentRevisionId: stored.parentRevisionId, currentHeadRevisionId: result.headRevisionId,
+    }, 409, { "cache-control": "no-store" });
     return context.json({ projectId, revisionId, result }, 201, { "cache-control": "no-store" });
   });
   app.post("/api/studio/projects/:projectId/build", async (context) => {
@@ -883,7 +937,26 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       }
       return context.json({ linked: true }, 200);
     }
-    return growthBoundary.forwardToHermes(rawBody, context.req.raw.headers, context.env);
+    const inbound = ordinaryMetaMessages(payload);
+    if (!inbound.length) return growthBoundary.forwardToHermes(rawBody, context.req.raw.headers, context.env);
+    const workflows = await Promise.all(inbound.map(async (message) => {
+      const tenant = await deriveTenantIdentity(message.senderWaId);
+      const workflowId = await workflowIdForProviderMessage(message.providerMessageId);
+      const result = await adminBoundary.beginInboundWorkflow({
+        workflowId, merchantId: tenant.merchantId, ownerWaIdHash: tenant.ownerWaIdHash,
+        channel: "whatsapp_cloud", providerMessageId: message.providerMessageId,
+      }, context.env);
+      return { ...result, workflowId };
+    }));
+    const created = workflows.filter((workflow) => workflow.created);
+    if (!created.length) return context.json({ accepted: true, duplicate: true, workflowIds: workflows.map((workflow) => workflow.workflowId) }, 200);
+    const forwarded = await growthBoundary.forwardToHermes(rawBody, context.req.raw.headers, context.env);
+    const status = WorkflowStatusSchema.parse(forwarded.ok ? "processing" : "retrying");
+    const progress = WorkflowProgressSchema.parse(forwarded.ok ? "message_received" : "temporary_retry");
+    await Promise.all(created.map((workflow) => adminBoundary.recordWorkflowProgress({
+      workflowId: workflow.workflowId, eventId: `${workflow.workflowId}:${forwarded.ok ? "forwarded" : "retrying"}`, status, progress,
+    }, context.env)));
+    return forwarded;
   });
   app.post("/webhooks/vapi", async (context) => {
     const body = await context.req.text();
@@ -918,17 +991,28 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       return context.text("Hermes owner identity mismatch", 403);
     }
     const { merchantId: _merchantId, ownerWaIdHash: _ownerWaIdHash, ...merchantInput } = submitted;
-    const brief = BusinessBriefSchema.parse({ ...BusinessBriefInputSchema.parse(merchantInput), ...identity });
+    const intake = StudioIntakeInputSchema.parse(merchantInput);
+    const { projectId: requestedProjectId, projectIntent = "website", ...briefInput } = intake;
+    const brief = BusinessBriefSchema.parse({ ...BusinessBriefInputSchema.parse(briefInput), ...identity });
     const result = await adminBoundary.upsertMerchant(brief, await encryptSensitive(brief.orderWhatsAppNumber, context.env?.PROOFGATE_DATA_KEY), context.env);
-    const project = studioProjectFromBusinessBrief(brief);
-    const revisionId = `revision-whatsapp-${(await sha256(canonicalize(brief))).slice(0, 32)}`;
+    const project = studioProjectFromBusinessBrief(brief, { intent: projectIntent, projectId: requestedProjectId });
+    const revisionId = `revision-whatsapp-${(await sha256(canonicalize({ brief, projectId: project.projectId, intent: project.intent }))).slice(0, 32)}`;
     const existing = (await adminBoundary.listStudioProjects(brief.merchantId, context.env)).find((entry) => entry.projectId === project.projectId);
     const studioResult = await adminBoundary.saveStudioProject({
       projectId: project.projectId!, revisionId, parentRevisionId: existing?.revisionId,
-      merchantId: brief.merchantId, intent: project.intent,
+      merchantId: brief.merchantId, intent: project.intent, source: "whatsapp",
       project: existing ? StudioProjectInputSchema.parse({ ...project, parentRevisionId: existing.revisionId }) : project,
     }, context.env);
-    return context.json({ accepted: true, merchantId: brief.merchantId, result, studio: { projectId: project.projectId, revisionId, result: studioResult } }, 201);
+    if (studioResult.conflict) return context.json({ accepted: false, conflict: true, projectId: project.projectId, currentHeadRevisionId: studioResult.headRevisionId }, 409);
+    const providerMessageId = context.req.header("x-hermes-message-id");
+    if (providerMessageId) {
+      const workflowId = await workflowIdForProviderMessage(providerMessageId);
+      await adminBoundary.recordWorkflowProgress({
+        workflowId, eventId: `${workflowId}:brief-saved:${revisionId}`, status: "processing", progress: "brief_saved",
+        projectId: project.projectId, intent: project.intent,
+      }, context.env);
+    }
+    return context.json({ accepted: true, merchantId: brief.merchantId, result, studio: { projectId: project.projectId, revisionId, intent: project.intent, result: studioResult } }, 201);
   });
   app.post("/internal/policy", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);

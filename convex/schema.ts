@@ -132,11 +132,80 @@ export default defineSchema({
     parentRevisionId: v.optional(v.string()),
     merchantId: v.string(),
     intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    source: v.optional(v.union(v.literal("whatsapp"), v.literal("studio"))),
     projectJson: v.string(),
     createdAt: v.number(),
   })
     .index("by_project_revision", ["projectId", "revisionId"])
     .index("by_merchant_created", ["merchantId", "createdAt"]),
+
+  studioProjectHeads: defineTable({
+    projectId: v.string(),
+    merchantId: v.string(),
+    headRevisionId: v.string(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    source: v.union(v.literal("whatsapp"), v.literal("studio")),
+    updatedAt: v.number(),
+  })
+    .index("by_project_id", ["projectId"])
+    .index("by_merchant_updated", ["merchantId", "updatedAt"]),
+
+  inboundWorkflows: defineTable({
+    workflowId: v.string(),
+    merchantId: v.string(),
+    ownerWaIdHash: v.string(),
+    channel: v.literal("whatsapp_cloud"),
+    providerMessageId: v.string(),
+    projectId: v.optional(v.string()),
+    intent: v.optional(v.union(v.literal("website"), v.literal("reels"), v.literal("both"))),
+    status: v.union(
+      v.literal("received"), v.literal("processing"), v.literal("awaiting_input"),
+      v.literal("awaiting_approval"), v.literal("retrying"), v.literal("completed"), v.literal("failed"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workflow_id", ["workflowId"])
+    .index("by_provider_message", ["channel", "providerMessageId"])
+    .index("by_merchant_updated", ["merchantId", "updatedAt"]),
+
+  workflowEvents: defineTable({
+    eventId: v.string(),
+    workflowId: v.string(),
+    merchantId: v.string(),
+    progress: v.union(
+      v.literal("message_received"), v.literal("brief_saved"), v.literal("media_saved"),
+      v.literal("building"), v.literal("checking"), v.literal("preview_ready"),
+      v.literal("approval_requested"), v.literal("published"), v.literal("reel_ready"), v.literal("temporary_retry"),
+    ),
+    status: v.union(
+      v.literal("received"), v.literal("processing"), v.literal("awaiting_input"),
+      v.literal("awaiting_approval"), v.literal("retrying"), v.literal("completed"), v.literal("failed"),
+    ),
+    projectId: v.optional(v.string()),
+    intent: v.optional(v.union(v.literal("website"), v.literal("reels"), v.literal("both"))),
+    createdAt: v.number(),
+  })
+    .index("by_event_id", ["eventId"])
+    .index("by_workflow_created", ["workflowId", "createdAt"]),
+
+  customerOutbox: defineTable({
+    outboxId: v.string(),
+    workflowId: v.string(),
+    merchantId: v.string(),
+    kind: v.union(v.literal("progress"), v.literal("missing_facts"), v.literal("approval"), v.literal("completion"), v.literal("retry")),
+    body: v.string(),
+    dedupeKey: v.string(),
+    status: v.union(v.literal("pending"), v.literal("sending"), v.literal("sent"), v.literal("failed")),
+    attempts: v.number(),
+    providerMessageId: v.optional(v.string()),
+    nextAttemptAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_outbox_id", ["outboxId"])
+    .index("by_dedupe_key", ["dedupeKey"])
+    .index("by_status_next_attempt", ["status", "nextAttemptAt"]),
 
   decisionPolicies: defineTable({
     policyId: v.string(),

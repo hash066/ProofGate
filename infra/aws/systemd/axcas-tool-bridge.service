@@ -1,0 +1,31 @@
+[Unit]
+Description=Axcas typed Hermes tool bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=axcasbridge
+Group=proofgate
+WorkingDirectory=/opt/proofgate/ProofGate
+Environment=NODE_ENV=production
+Environment=AXCAS_BRIDGE_SOCKET=/run/axcas/tool-bridge.sock
+EnvironmentFile=/etc/proofgate/axcas-tool-bridge.env
+RuntimeDirectory=axcas
+RuntimeDirectoryMode=0750
+UMask=0007
+ExecStart=/usr/bin/npm run start --workspace @axcas/tool-bridge
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

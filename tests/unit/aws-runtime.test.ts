@@ -29,7 +29,7 @@ describe("AWS Hermes runtime assets", () => {
     expect(unit).toContain("NoNewPrivileges=true");
   });
 
-  it("runs the pinned Hermes WhatsApp gateway as the proofgate user", async () => {
+  it("runs the pinned Hermes WhatsApp gateway without an admin credential", async () => {
     const unit = await readFile("infra/aws/systemd/proofgate-hermes-gateway.service", "utf8");
     const script = await readFile("infra/aws/install-runtime.sh", "utf8");
 
@@ -37,12 +37,14 @@ describe("AWS Hermes runtime assets", () => {
     expect(unit).toContain("Group=proofgate");
     expect(unit).toContain("Environment=HOME=/home/proofgate");
     expect(unit).toContain("WorkingDirectory=/home/proofgate");
-    expect(unit).toContain("EnvironmentFile=/etc/proofgate/hermes.env");
-    expect(unit).toContain("ExecStart=/usr/local/bin/hermes gateway --accept-hooks run");
+    expect(unit).toContain("EnvironmentFile=/etc/proofgate/hermes-gateway.env");
+    expect(unit).not.toContain("EnvironmentFile=/etc/proofgate/hermes.env");
+    expect(unit).toContain("ExecStart=/usr/local/bin/hermes gateway run");
+    expect(unit).not.toContain("--accept-hooks");
     expect(unit).toContain("Restart=on-failure");
     expect(unit).toContain("NoNewPrivileges=true");
     expect(script).toContain(
-      "install -m 0640 -o root -g proofgate /dev/null /etc/proofgate/hermes.env",
+      "install -m 0600 -o root -g root /dev/null /etc/proofgate/hermes.env",
     );
     expect(script).toContain("proofgate-hermes-gateway.service");
     expect(script).toContain("systemctl enable proofgate-hermes-gateway.service");
@@ -55,10 +57,11 @@ describe("AWS Hermes runtime assets", () => {
     expect(config).toContain("default: moonshotai/Kimi-K2.6");
     expect(config).toContain("provider: openai-api");
     expect(config).toContain("base_url: https://api.studio.nebius.ai/v1");
-    expect(config).not.toMatch(/api.?key|access.?token|secret/i);
+    expect(config).not.toMatch(/(?:api.?key|access.?token|service.?secret)\s*:/i);
     expect(script).toContain("infra/aws/hermes-config.yaml");
     expect(script).toContain("/home/proofgate/.hermes/config.yaml");
-    expect(script).toContain("grep -q '^model:'");
+    expect(config).toContain("whatsapp: [axcas]");
+    expect(config).toContain("enabled: [axcas]");
   });
 
   it("keeps AWS ingress closed and exposes deployment outputs", async () => {
@@ -93,6 +96,7 @@ describe("AWS Hermes runtime assets", () => {
   it("keeps the Hermes admin credential in Secrets Manager and syncs it without printing", async () => {
     const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
     const syncScript = await readFile("infra/aws/sync-hermes-admin-secret.mjs", "utf8");
+    const deploy = await readFile("infra/aws/deploy.ps1", "utf8");
 
     expect(template).toContain("HermesAdminSecret:");
     expect(template).toContain("Action: [secretsmanager:GetSecretValue]");
@@ -103,6 +107,14 @@ describe("AWS Hermes runtime assets", () => {
     expect(syncScript).toContain("PROOFGATE_ADMIN_URL");
     expect(syncScript).toContain("PROOFGATE_SERVICE_SECRET");
     expect(syncScript).not.toContain("console.info(serviceSecret");
+    expect(syncScript).toContain('/etc/proofgate/axcas-tool-bridge.env');
+    expect(syncScript).toContain('/etc/proofgate/hermes.env');
+    expect(deploy).toContain("sync-hermes-admin-secret.mjs");
+    expect(deploy).toContain("systemctl restart axcas-tool-bridge.service");
+    expect(deploy).toContain("systemctl restart proofgate-hermes-gateway.service");
+    expect(deploy.indexOf("systemctl restart axcas-tool-bridge.service")).toBeLessThan(
+      deploy.indexOf("systemctl restart proofgate-hermes-gateway.service"),
+    );
   });
 
   it("installs the durable SQS relay as a restricted service", async () => {
@@ -120,7 +132,7 @@ describe("AWS Hermes runtime assets", () => {
   it("runs the approval-claiming reel guardian as a restricted AWS service", async () => {
     const unit = await readFile("infra/aws/systemd/axcas-reel-guardian.service", "utf8");
     const script = await readFile("infra/aws/install-runtime.sh", "utf8");
-    expect(unit).toContain("User=proofgate");
+    expect(unit).toContain("User=axcasguardian");
     expect(unit).toContain("EnvironmentFile=/etc/proofgate/hermes.env");
     expect(unit).toContain("@axcas/reel-guardian");
     expect(unit).toContain("NoNewPrivileges=true");
@@ -131,7 +143,7 @@ describe("AWS Hermes runtime assets", () => {
   it("runs the approved call guardian as a restricted AWS service", async () => {
     const unit = await readFile("infra/aws/systemd/axcas-call-guardian.service", "utf8");
     const script = await readFile("infra/aws/install-runtime.sh", "utf8");
-    expect(unit).toContain("User=proofgate");
+    expect(unit).toContain("User=axcasguardian");
     expect(unit).toContain("NoNewPrivileges=true");
     expect(unit).toContain("@axcas/call-guardian");
     expect(script).toContain("axcas-call-guardian.service");

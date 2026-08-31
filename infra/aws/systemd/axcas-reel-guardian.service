@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=proofgate
-Group=proofgate
+User=axcasguardian
+Group=axcasguardian
 WorkingDirectory=/opt/proofgate/ProofGate
 Environment=NODE_ENV=production
 Environment=AWS_REGION=ap-south-1

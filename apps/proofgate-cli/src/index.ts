@@ -43,7 +43,7 @@ async function main() {
     prepared = await prepareJsonCommand(command as "intake" | "candidate" | "verification" | "release" | "lead" | "batch" | "reel" | "policy" | "decision" | "social-campaign", JSON.parse(await readFile(args[0], "utf8")));
   }
   if (!args.includes("--submit")) {
-    process.stdout.write(`${JSON.stringify({ valid: true, path: prepared.path, method: prepared.method, bytes: typeof prepared.body === "string" ? Buffer.byteLength(prepared.body) : prepared.body.byteLength })}\n`);
+    process.stdout.write(`${JSON.stringify({ valid: true, path: prepared.path, method: prepared.method, bytes: typeof prepared.body === "string" ? Buffer.byteLength(prepared.body) : prepared.body?.byteLength ?? 0 })}\n`);
     return;
   }
   process.stdout.write(`${JSON.stringify(await submitCommand(prepared))}\n`);

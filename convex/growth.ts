@@ -128,25 +128,55 @@ export const adminRevokeStudioSession = action({
 export const saveStudioProjectInternal = internalMutation({
   args: {
     projectId: v.string(), revisionId: v.string(), parentRevisionId: v.optional(v.string()), merchantId: v.string(),
-    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")), projectJson: v.string(), createdAt: v.number(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    source: v.union(v.literal("whatsapp"), v.literal("studio")), projectJson: v.string(), createdAt: v.number(),
   },
   handler: async (context, args) => {
     const existingRevision = await context.db.query("studioProjects").withIndex("by_project_revision", (range) => range.eq("projectId", args.projectId).eq("revisionId", args.revisionId)).unique();
-    if (existingRevision) return { inserted: false };
-    const projectRevisions = (await context.db.query("studioProjects").withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId)).collect()).filter((entry) => entry.projectId === args.projectId);
-    if (projectRevisions.length && !args.parentRevisionId) throw new Error("studio project revision requires a parent");
-    if (args.parentRevisionId && !projectRevisions.some((entry) => entry.revisionId === args.parentRevisionId)) throw new Error("studio project parent revision not found");
+    if (existingRevision) {
+      const identical = existingRevision.merchantId === args.merchantId && existingRevision.parentRevisionId === args.parentRevisionId
+        && existingRevision.intent === args.intent && (existingRevision.source ?? (existingRevision.projectId.startsWith("project-whatsapp-") ? "whatsapp" : "studio")) === args.source
+        && existingRevision.projectJson === args.projectJson;
+      if (!identical) throw new Error("immutable studio revision conflict");
+      const head = await context.db.query("studioProjectHeads").withIndex("by_project_id", (range) => range.eq("projectId", args.projectId)).unique();
+      const legacyHead = head ? undefined : (await context.db.query("studioProjects")
+        .withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId)).order("desc").collect())
+        .find((entry) => entry.projectId === args.projectId);
+      const headRevisionId = head?.headRevisionId ?? legacyHead?.revisionId ?? existingRevision.revisionId;
+      return { inserted: false, conflict: headRevisionId !== existingRevision.revisionId, headRevisionId };
+    }
+    const explicitHead = await context.db.query("studioProjectHeads").withIndex("by_project_id", (range) => range.eq("projectId", args.projectId)).unique();
+    if (explicitHead && explicitHead.merchantId !== args.merchantId) throw new Error("studio project tenant conflict");
+    const legacyHead = explicitHead ? undefined : (await context.db.query("studioProjects")
+      .withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId)).order("desc").collect())
+      .find((entry) => entry.projectId === args.projectId);
+    const currentHeadRevisionId = explicitHead?.headRevisionId ?? legacyHead?.revisionId;
+    if (currentHeadRevisionId && args.parentRevisionId !== currentHeadRevisionId) {
+      return { inserted: false, conflict: true, headRevisionId: currentHeadRevisionId };
+    }
+    if (!currentHeadRevisionId && args.parentRevisionId) {
+      return { inserted: false, conflict: true, headRevisionId: undefined };
+    }
     await context.db.insert("studioProjects", args);
-    return { inserted: true };
+    if (explicitHead) {
+      await context.db.patch(explicitHead._id, { headRevisionId: args.revisionId, intent: args.intent, source: args.source, updatedAt: args.createdAt });
+    } else {
+      await context.db.insert("studioProjectHeads", {
+        projectId: args.projectId, merchantId: args.merchantId, headRevisionId: args.revisionId,
+        intent: args.intent, source: args.source, updatedAt: args.createdAt,
+      });
+    }
+    return { inserted: true, conflict: false, headRevisionId: args.revisionId };
   },
 });
 
 export const adminSaveStudioProject = action({
   args: {
     serviceSecret: v.string(), projectId: v.string(), revisionId: v.string(), parentRevisionId: v.optional(v.string()), merchantId: v.string(),
-    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")), projectJson: v.string(), createdAt: v.number(),
+    intent: v.union(v.literal("website"), v.literal("reels"), v.literal("both")),
+    source: v.union(v.literal("whatsapp"), v.literal("studio")), projectJson: v.string(), createdAt: v.number(),
   },
-  handler: async (context, args): Promise<{ inserted: boolean }> => {
+  handler: async (context, args): Promise<{ inserted: boolean; conflict: boolean; headRevisionId?: string }> => {
     requireServiceSecret(args.serviceSecret);
     const { serviceSecret: _secret, ...record } = args;
     return context.runMutation(internal.growth.saveStudioProjectInternal, record);
@@ -158,12 +188,146 @@ export const adminListStudioProjects = query({
   handler: async (context, args) => {
     requireServiceSecret(args.serviceSecret);
     const revisions = await context.db.query("studioProjects").withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId)).order("desc").collect();
+    const heads = await context.db.query("studioProjectHeads").withIndex("by_merchant_updated", (range) => range.eq("merchantId", args.merchantId)).order("desc").collect();
+    const byRevision = new Map(revisions.map((revision) => [`${revision.projectId}:${revision.revisionId}`, revision]));
     const latest = new Map<string, typeof revisions[number]>();
+    for (const head of heads) {
+      const revision = byRevision.get(`${head.projectId}:${head.headRevisionId}`);
+      if (revision) latest.set(head.projectId, revision);
+    }
     for (const revision of revisions) if (!latest.has(revision.projectId)) latest.set(revision.projectId, revision);
     return Array.from(latest.values()).map((entry) => ({
       projectId: entry.projectId, revisionId: entry.revisionId, parentRevisionId: entry.parentRevisionId,
-      intent: entry.intent, projectJson: entry.projectJson, createdAt: entry.createdAt,
+      intent: entry.intent, source: entry.source ?? (entry.projectId.startsWith("project-whatsapp-") ? "whatsapp" : "studio"),
+      projectJson: entry.projectJson, createdAt: entry.createdAt,
     }));
+  },
+});
+
+export const adminListStudioProjectChanges = query({
+  args: {
+    serviceSecret: v.string(), merchantId: v.string(), afterCreatedAt: v.number(),
+    afterProjectId: v.string(), afterRevisionId: v.string(), limit: v.number(),
+  },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const limit = Math.max(1, Math.min(100, Math.trunc(args.limit)));
+    const revisions = await context.db.query("studioProjects")
+      .withIndex("by_merchant_created", (range) => range.eq("merchantId", args.merchantId).gte("createdAt", args.afterCreatedAt))
+      .order("asc").collect();
+    return revisions.filter((entry) => entry.createdAt > args.afterCreatedAt
+      || entry.projectId > args.afterProjectId
+      || (entry.projectId === args.afterProjectId && entry.revisionId > args.afterRevisionId))
+      .sort((left, right) => left.createdAt - right.createdAt || left.projectId.localeCompare(right.projectId) || left.revisionId.localeCompare(right.revisionId))
+      .slice(0, limit)
+      .map((entry) => ({
+        projectId: entry.projectId, revisionId: entry.revisionId, parentRevisionId: entry.parentRevisionId,
+        intent: entry.intent, source: entry.source ?? (entry.projectId.startsWith("project-whatsapp-") ? "whatsapp" : "studio"),
+        projectJson: entry.projectJson, createdAt: entry.createdAt,
+      }));
+  },
+});
+
+const workflowTransitions: Record<string, readonly string[]> = {
+  received: ["processing", "retrying", "failed"],
+  processing: ["awaiting_input", "awaiting_approval", "retrying", "completed", "failed"],
+  awaiting_input: ["processing", "failed"], awaiting_approval: ["processing", "completed", "failed"],
+  retrying: ["processing", "failed"], completed: [], failed: [],
+};
+
+export const beginInboundWorkflowInternal = internalMutation({
+  args: {
+    workflowId: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(), channel: v.literal("whatsapp_cloud"),
+    providerMessageId: v.string(), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const existing = await context.db.query("inboundWorkflows").withIndex("by_provider_message", (range) => range.eq("channel", args.channel).eq("providerMessageId", args.providerMessageId)).unique();
+    if (existing) {
+      if (existing.merchantId !== args.merchantId || existing.ownerWaIdHash !== args.ownerWaIdHash) throw new Error("provider message tenant conflict");
+      return { created: false, workflowId: existing.workflowId, status: existing.status };
+    }
+    await context.db.insert("inboundWorkflows", { ...args, status: "received", updatedAt: args.createdAt });
+    await context.db.insert("workflowEvents", {
+      eventId: `${args.workflowId}:received`, workflowId: args.workflowId, merchantId: args.merchantId,
+      progress: "message_received", status: "received", createdAt: args.createdAt,
+    });
+    return { created: true, workflowId: args.workflowId, status: "received" as const };
+  },
+});
+
+export const adminBeginInboundWorkflow = action({
+  args: {
+    serviceSecret: v.string(), workflowId: v.string(), merchantId: v.string(), ownerWaIdHash: v.string(),
+    channel: v.literal("whatsapp_cloud"), providerMessageId: v.string(), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ created: boolean; workflowId: string; status: string }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.beginInboundWorkflowInternal, record);
+  },
+});
+
+export const recordWorkflowProgressInternal = internalMutation({
+  args: {
+    workflowId: v.string(), eventId: v.string(), status: v.string(), progress: v.string(),
+    projectId: v.optional(v.string()), intent: v.optional(v.union(v.literal("website"), v.literal("reels"), v.literal("both"))), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const duplicate = await context.db.query("workflowEvents").withIndex("by_event_id", (range) => range.eq("eventId", args.eventId)).unique();
+    if (duplicate) return { inserted: false, status: duplicate.status };
+    const workflow = await context.db.query("inboundWorkflows").withIndex("by_workflow_id", (range) => range.eq("workflowId", args.workflowId)).unique();
+    if (!workflow) return { inserted: false, status: "missing" };
+    if (args.status !== workflow.status && !workflowTransitions[workflow.status]?.includes(args.status)) throw new Error("invalid workflow transition");
+    await context.db.insert("workflowEvents", {
+      eventId: args.eventId, workflowId: args.workflowId, merchantId: workflow.merchantId,
+      progress: args.progress as any, status: args.status as any, projectId: args.projectId, intent: args.intent, createdAt: args.createdAt,
+    });
+    await context.db.patch(workflow._id, {
+      status: args.status as any, updatedAt: args.createdAt,
+      ...(args.projectId ? { projectId: args.projectId } : {}), ...(args.intent ? { intent: args.intent } : {}),
+    });
+    return { inserted: true, status: args.status };
+  },
+});
+
+export const adminRecordWorkflowProgress = action({
+  args: {
+    serviceSecret: v.string(), workflowId: v.string(), eventId: v.string(), status: v.string(), progress: v.string(),
+    projectId: v.optional(v.string()), intent: v.optional(v.union(v.literal("website"), v.literal("reels"), v.literal("both"))), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ inserted: boolean; status: string }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.recordWorkflowProgressInternal, record);
+  },
+});
+
+export const enqueueCustomerOutboxInternal = internalMutation({
+  args: {
+    outboxId: v.string(), workflowId: v.string(), merchantId: v.string(),
+    kind: v.union(v.literal("progress"), v.literal("missing_facts"), v.literal("approval"), v.literal("completion"), v.literal("retry")),
+    body: v.string(), dedupeKey: v.string(), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const duplicate = await context.db.query("customerOutbox").withIndex("by_dedupe_key", (range) => range.eq("dedupeKey", args.dedupeKey)).unique();
+    if (duplicate) return { inserted: false, outboxId: duplicate.outboxId };
+    const workflow = await context.db.query("inboundWorkflows").withIndex("by_workflow_id", (range) => range.eq("workflowId", args.workflowId)).unique();
+    if (!workflow || workflow.merchantId !== args.merchantId) throw new Error("outbox workflow tenant mismatch");
+    await context.db.insert("customerOutbox", { ...args, status: "pending", attempts: 0, nextAttemptAt: args.createdAt, updatedAt: args.createdAt });
+    return { inserted: true, outboxId: args.outboxId };
+  },
+});
+
+export const adminEnqueueCustomerOutbox = action({
+  args: {
+    serviceSecret: v.string(), outboxId: v.string(), workflowId: v.string(), merchantId: v.string(),
+    kind: v.union(v.literal("progress"), v.literal("missing_facts"), v.literal("approval"), v.literal("completion"), v.literal("retry")),
+    body: v.string(), dedupeKey: v.string(), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ inserted: boolean; outboxId: string }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.enqueueCustomerOutboxInternal, record);
   },
 });
 

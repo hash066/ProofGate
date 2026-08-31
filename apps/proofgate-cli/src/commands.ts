@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
 
-import { BusinessBriefInputSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema } from "../../../packages/domain/src/growth";
+import { LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema } from "../../../packages/domain/src/growth";
 import { DecisionPolicySchema, DecisionRequestSchema } from "../../../packages/domain/src/decision-policy";
+import { StudioIntakeInputSchema } from "../../../packages/domain/src/studio";
 import { createCallBatch } from "../../../packages/release-policy/src/growth-policy";
 import { createSocialCampaign } from "../../../packages/social/src/experiment";
 
-export type PreparedCommand = { path: string; method: "POST" | "PUT"; body: string | Uint8Array; contentType: string; extraHeaders?: Record<string, string> };
+export type PreparedCommand = { path: string; method: "GET" | "POST" | "PUT"; body?: string | Uint8Array; contentType: string; extraHeaders?: Record<string, string> };
 
 export function prepareReelDeliveryCommand(input: { reelId: string; renderedAssetId: string; recipientWaId: string; caption?: string }): PreparedCommand {
   if (!/^[a-zA-Z0-9_-]{3,128}$/.test(input.reelId) || !/^[a-zA-Z0-9_-]{3,128}$/.test(input.renderedAssetId)) throw new Error("reel delivery scope is invalid");
@@ -17,7 +18,7 @@ export function prepareReelDeliveryCommand(input: { reelId: string; renderedAsse
 export async function prepareJsonCommand(command: "intake" | "candidate" | "verification" | "release" | "lead" | "batch" | "reel" | "policy" | "decision" | "social-campaign", payload: unknown): Promise<PreparedCommand> {
   if (command === "policy") return { path: "/internal/policy", method: "POST", body: JSON.stringify(DecisionPolicySchema.parse(payload)), contentType: "application/json" };
   if (command === "decision") return { path: "/internal/decision", method: "POST", body: JSON.stringify(DecisionRequestSchema.parse(payload)), contentType: "application/json" };
-  if (command === "intake") return { path: "/internal/intake", method: "POST", body: JSON.stringify(BusinessBriefInputSchema.parse(payload)), contentType: "application/json" };
+  if (command === "intake") return { path: "/internal/intake", method: "POST", body: JSON.stringify(StudioIntakeInputSchema.parse(payload)), contentType: "application/json" };
   if (command === "candidate") {
     const value = payload as { spec?: unknown; versionId?: unknown; parentVersionId?: unknown };
     if (typeof value?.versionId !== "string" || !/^[a-zA-Z0-9_-]{3,128}$/.test(value.versionId)) throw new Error("candidate versionId is invalid");
@@ -64,7 +65,11 @@ export async function submitCommand(command: PreparedCommand, env: NodeJS.Proces
   const baseUrl = env.PROOFGATE_ADMIN_URL;
   const secret = env.PROOFGATE_SERVICE_SECRET;
   if (!baseUrl || !secret) throw new Error("PROOFGATE_ADMIN_URL and PROOFGATE_SERVICE_SECRET are required");
-  const requestBody: BodyInit = typeof command.body === "string" ? command.body : new Uint8Array(Array.from(command.body)).buffer;
+  const requestBody: BodyInit | undefined = typeof command.body === "string"
+    ? command.body
+    : command.body
+      ? new Uint8Array(Array.from(command.body)).buffer
+      : undefined;
   const response = await fetch(`${baseUrl.replace(/\/$/, "")}${command.path}`, {
     method: command.method,
     headers: {
@@ -75,7 +80,7 @@ export async function submitCommand(command: PreparedCommand, env: NodeJS.Proces
       "x-hermes-message-id": env.HERMES_SESSION_MESSAGE_ID ?? "",
       ...command.extraHeaders,
     },
-    body: requestBody,
+    body: command.method === "GET" ? undefined : requestBody,
   });
   const text = await response.text();
   if (!response.ok) throw new Error(`ProofGate admin request failed (${response.status}): ${text.slice(0, 500)}`);

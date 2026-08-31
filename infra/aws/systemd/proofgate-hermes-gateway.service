@@ -1,7 +1,8 @@
 [Unit]
 Description=ProofGate Hermes WhatsApp gateway
-After=network-online.target
+After=network-online.target axcas-tool-bridge.service
 Wants=network-online.target
+Requires=axcas-tool-bridge.service
 
 [Service]
 Type=simple
@@ -9,8 +10,9 @@ User=proofgate
 Group=proofgate
 Environment=HOME=/home/proofgate
 WorkingDirectory=/home/proofgate
-EnvironmentFile=/etc/proofgate/hermes.env
-ExecStart=/usr/local/bin/hermes gateway --accept-hooks run
+Environment=AXCAS_BRIDGE_SOCKET=/run/axcas/tool-bridge.sock
+EnvironmentFile=/etc/proofgate/hermes-gateway.env
+ExecStart=/usr/local/bin/hermes gateway run
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

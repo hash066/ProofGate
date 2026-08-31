@@ -14,6 +14,9 @@ __pycache__/
 # Convex local
 .convex/
 
+# Cloudflare local development
+.wrangler/
+
 # Playwright
 test-results/
 playwright-report/

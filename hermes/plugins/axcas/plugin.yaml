@@ -1,0 +1,7 @@
+name: axcas
+version: "0.1.0"
+description: Typed merchant-safe Axcas operations for the WhatsApp gateway
+kind: standalone
+provides_tools:
+  - axcas_continue
+  - axcas_status

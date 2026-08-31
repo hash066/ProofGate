@@ -26,7 +26,8 @@
     "spike:b:dispatch": "tsx apps/spike-b-dispatcher/src/run.ts",
     "test:legacy": "node --test tests/integration/server.test.js tests/unit/booking.test.js",
     "test:unit": "vitest run --exclude='tests/**/*.test.js'",
-    "test": "npm run test:legacy && npm run test:unit",
+    "test:hermes-plugin": "python tests/hermes_plugin_test.py",
+    "test": "npm run test:legacy && npm run test:unit && npm run test:hermes-plugin",
     "typecheck": "tsc --noEmit && npm run typecheck --workspace=@axcas/reel-template-worker"
   },
   "dependencies": {

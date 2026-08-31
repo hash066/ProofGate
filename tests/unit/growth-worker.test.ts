@@ -57,8 +57,12 @@ function adminBoundary(): GrowthAdminBoundary {
     completeStudioLink: vi.fn(async () => ({ status: "pending" as const })),
     getStudioSession: vi.fn(async () => null),
     revokeStudioSession: vi.fn(async () => ({ revoked: true })),
-    saveStudioProject: vi.fn(async () => ({ inserted: true })),
+    saveStudioProject: vi.fn(async (input) => ({ inserted: true, conflict: false, headRevisionId: input.revisionId })),
     listStudioProjects: vi.fn(async () => []),
+    listStudioProjectChanges: vi.fn(async () => []),
+    beginInboundWorkflow: vi.fn(async (input) => ({ created: true, workflowId: input.workflowId, status: "received" })),
+    recordWorkflowProgress: vi.fn(async (input) => ({ inserted: true, status: input.status })),
+    enqueueCustomerOutbox: vi.fn(async (input) => ({ inserted: true, outboxId: input.outboxId })),
   };
 }
 
@@ -72,6 +76,7 @@ describe("growth Worker", () => {
     const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio", undefined, { AXCAS_WHATSAPP_NUMBER: "919999888877" } as never);
     expect(response.status).toBe(200);
     expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
+    expect(response.headers.get("content-security-policy")).toContain("img-src 'self' blob: data:");
     const html = await response.text();
     expect(html).toContain('data-pg="studio"');
     expect(html).toContain("Build a website");
@@ -92,6 +97,19 @@ describe("growth Worker", () => {
     expect(html).toContain("What do you offer?");
     expect(html).toContain("Build checked preview");
     expect(html).toContain('data-pg="publish-checklist"');
+    expect(html).toContain('data-pg="studio-builder"');
+    expect(html).toContain('data-pg="section-navigator"');
+    expect(html).toContain('data-pg="studio-canvas"');
+    expect(html).toContain('data-pg="preview-device"');
+    expect(html).toContain('data-pg="offering-manager"');
+    expect(html).toContain('data-pg="media-manager"');
+    expect(html).toContain('data-pg="undo"');
+    expect(html).toContain('data-pg="version-cue"');
+    expect(html).toContain('data-pg="sync-conflict"');
+    expect(html).toContain("Load WhatsApp version");
+    expect(html).toContain("Reapply my edits");
+    expect(html).toContain("Mobile");
+    expect(html).toContain("Desktop");
     expect(html).toMatch(/<script src="\/studio\.js\?v=[a-z0-9-]+" defer><\/script>/);
     expect(html).not.toContain("API key");
   });
@@ -110,7 +128,26 @@ describe("growth Worker", () => {
     expect(javascript).toContain("refreshAccount");
     expect(javascript).toContain("hydrateProject");
     expect(javascript).toContain("showWorkspace();refreshAccount()");
+    expect(javascript).toContain("renderCanvas");
+    expect(javascript).toContain("textContent");
+    expect(javascript).toContain("preview-device");
+    expect(javascript).toContain("moveOffering");
+    expect(javascript).toContain("undoDraft");
+    expect(javascript).toContain("URL.createObjectURL");
+    expect(javascript).toContain("/api/studio/projects/changes");
+    expect(javascript).toContain("saved.status===409");
+    expect(javascript).toContain("resolveConflict");
     expect(() => new Script(javascript)).not.toThrow();
+  });
+
+  it("styles Studio as a responsive three-pane structured builder", async () => {
+    const response = await createApp(undefined, boundary(), adminBoundary()).request("http://proofgate.test/studio.css");
+    const css = await response.text();
+    expect(css).toContain(".builder-shell");
+    expect(css).toContain(".section-nav");
+    expect(css).toContain(".canvas-stage");
+    expect(css).toContain(".device-mobile");
+    expect(css).toContain("position:sticky");
   });
 
   it("restores a persistent WhatsApp account with its latest saved work", async () => {
@@ -247,6 +284,32 @@ describe("growth Worker", () => {
       merchantId: "merchant-maya", intent: "website", projectId: expect.stringMatching(/^project-/), revisionId: expect.stringMatching(/^revision-/),
       project: expect.objectContaining({ businessName: "Maya Studio", siteStyle: "minimal" }),
     }), undefined);
+  });
+
+  it("returns an explicit compare-and-swap conflict instead of silently branching a project", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.saveStudioProject as ReturnType<typeof vi.fn>).mockResolvedValue({ inserted: false, conflict: true, headRevisionId: "revision-current" });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/projects", {
+      method: "POST", headers: { "content-type": "application/json", cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+      body: JSON.stringify({ projectId: "project-maya", parentRevisionId: "revision-stale", intent: "website", businessName: "Maya Studio", description: "Tailoring in Bengaluru", siteStyle: "minimal" }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ conflict: true, submittedParentRevisionId: "revision-stale", currentHeadRevisionId: "revision-current" });
+  });
+
+  it("returns cursor-based project deltas rather than reloading the full account", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioProjectChanges as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      projectId: "project-maya", revisionId: "revision-next", parentRevisionId: "revision-old", intent: "both", source: "whatsapp", createdAt: 101,
+      project: { projectId: "project-maya", parentRevisionId: "revision-old", intent: "both", businessName: "Maya Studio", description: "Tailoring", siteStyle: "minimal", reelTemplate: "split_explainer", referenceAssetIds: [], siteAssetIds: [], suppliedClaims: [], layerOverrides: { hook: "Hook", proof: "Proof", cta: "Message us", accent: "#fe5b3a", pacing: "balanced" } },
+    }]);
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/projects/changes?cursor=100%3Aproject-maya%3Arevision-old", {
+      headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" },
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ changes: [expect.objectContaining({ revisionId: "revision-next", intent: "both", source: "whatsapp" })], cursor: "101:project-maya:revision-next" });
   });
 
   it("turns one complete Studio project into a verified candidate and one publish checklist", async () => {
@@ -525,7 +588,8 @@ describe("growth Worker", () => {
     const secret = "meta-secret";
     const approvalBody = JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ from: "919876543210", id: "wamid.tap", type: "interactive", interactive: { button_reply: { id: "pg:approval-1:approve" } } }] } }] }] });
     const growth = boundary();
-    const app = createApp(undefined, growth);
+    const admin = adminBoundary();
+    const app = createApp(undefined, growth, admin);
     const approved = await app.request("http://proofgate.test/whatsapp/webhook", {
       method: "POST",
       headers: { "content-type": "application/json", "x-hub-signature-256": await metaSignatureForTest(approvalBody, secret) },
@@ -544,6 +608,18 @@ describe("growth Worker", () => {
     expect(forwarded.status).toBe(202);
     expect(growth.forwardToHermes).toHaveBeenCalledOnce();
     expect(new TextDecoder().decode((growth.forwardToHermes as any).mock.calls[0][0])).toBe(ordinaryBody);
+    expect(admin.beginInboundWorkflow).toHaveBeenCalledWith(expect.objectContaining({
+      merchantId: expect.stringMatching(/^merchant-/), providerMessageId: "wamid.text", channel: "whatsapp_cloud",
+    }), expect.anything());
+    expect(admin.recordWorkflowProgress).toHaveBeenCalledWith(expect.objectContaining({ status: "processing", progress: "message_received" }), expect.anything());
+
+    (admin.beginInboundWorkflow as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ created: false, workflowId: "workflow-existing", status: "processing" });
+    const duplicate = await app.request("http://proofgate.test/whatsapp/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": await metaSignatureForTest(ordinaryBody, secret) }, body: ordinaryBody,
+    }, { META_APP_SECRET: secret, META_VERIFY_TOKEN: "verify" });
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.json()).toMatchObject({ accepted: true, duplicate: true, workflowIds: [expect.stringMatching(/^workflow-/)] });
+    expect(growth.forwardToHermes).toHaveBeenCalledOnce();
   });
 
   it("fails closed on invalid provider signatures", async () => {
@@ -678,7 +754,6 @@ describe("growth Worker", () => {
     const identity = await deriveTenantIdentity(owner);
     const brief = {
       schemaVersion: 1,
-      ...identity,
       businessType: "home_bakery",
       businessName: "Maya's Oven",
       timezone: "Asia/Kolkata",
@@ -689,6 +764,8 @@ describe("growth Worker", () => {
       leadTime: "Order at least 48 hours ahead.",
       suppliedClaims: ["Eggless options available on request."],
       catalog: [{ name: "Chocolate Truffle", priceMinor: 120000, currency: "INR", imageAssetId: "cake-1" }],
+      projectId: "project-maya-both",
+      projectIntent: "both",
     };
     const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/intake", {
       method: "POST",
@@ -700,12 +777,14 @@ describe("growth Worker", () => {
     expect(String((admin.upsertMerchant as any).mock.calls[0][1])).toMatch(/^aesgcm:v1:/);
     expect(admin.saveStudioProject).toHaveBeenCalledWith(expect.objectContaining({
       merchantId: identity.merchantId,
-      intent: "website",
-      projectId: expect.stringMatching(/^project-whatsapp-/),
+      intent: "both",
+      source: "whatsapp",
+      projectId: "project-maya-both",
       revisionId: expect.stringMatching(/^revision-whatsapp-/),
       project: expect.objectContaining({
         businessName: "Maya's Oven",
         siteStyle: "catalog",
+        reelTemplate: "split_explainer",
         referenceAssetIds: ["cake-1"],
         siteAssetIds: ["cake-1"],
       }),
@@ -714,7 +793,7 @@ describe("growth Worker", () => {
     const rejected = await createApp(undefined, boundary(), admin).request("http://proofgate.test/internal/intake", {
       method: "POST",
       headers: { authorization: "Bearer service-secret", "content-type": "application/json", "x-hermes-user-id": "15551234567" },
-      body: JSON.stringify(brief),
+      body: JSON.stringify({ ...brief, ...identity }),
     }, { PROOFGATE_SERVICE_SECRET: "service-secret", PROOFGATE_DATA_KEY: btoa("12345678901234567890123456789012") });
     expect(rejected.status).toBe(403);
   });

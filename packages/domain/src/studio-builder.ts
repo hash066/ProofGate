@@ -58,16 +58,34 @@ const siteStyleByType: Record<BusinessType, StudioProjectInput["siteStyle"]> = {
   other: "minimal",
 };
 
-export function studioProjectFromBusinessBrief(briefInput: unknown): StudioProjectInput {
+export function studioProjectFromBusinessBrief(
+  briefInput: unknown,
+  options: { intent?: StudioProjectInput["intent"]; projectId?: string } = {},
+): StudioProjectInput {
   const brief = BusinessBriefSchema.parse(briefInput);
   const assetIds = Array.from(new Set(brief.catalog.map((item) => item.imageAssetId)));
-  const projectId = `project-whatsapp-${brief.merchantId.replace(/^merchant-/, "")}`.slice(0, 128);
+  // Keep the legacy default stable so existing WhatsApp workspaces do not fork on
+  // upgrade. A journey that starts another business supplies its explicit projectId.
+  const inferredProjectId = `project-whatsapp-${brief.merchantId.replace(/^merchant-/, "")}`.slice(0, 128);
+  const intent = options.intent ?? "website";
+  const projectId = options.projectId ?? inferredProjectId;
+  const firstOffering = brief.catalog[0]!.name;
   return StudioProjectInputSchema.parse({
     projectId,
-    intent: "website",
+    intent,
     businessName: brief.businessName,
     description: brief.description,
-    siteStyle: siteStyleByType[brief.businessType],
+    ...(intent !== "reels" ? { siteStyle: siteStyleByType[brief.businessType] } : {}),
+    ...(intent !== "website" ? {
+      reelTemplate: "split_explainer",
+      layerOverrides: {
+        hook: `See ${firstOffering} from ${brief.businessName}`,
+        proof: brief.suppliedClaims[0] ?? brief.description,
+        cta: `Message ${brief.businessName} on WhatsApp`,
+        accent: accentByType[brief.businessType],
+        pacing: "balanced",
+      },
+    } : {}),
     referenceAssetIds: assetIds,
     siteAssetIds: assetIds,
     orderWhatsAppNumber: brief.orderWhatsAppNumber,

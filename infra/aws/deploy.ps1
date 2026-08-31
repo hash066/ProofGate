@@ -2,7 +2,8 @@ param(
   [string]$Region = "ap-south-1",
   [string]$StackName = "proofgate-foundation",
   [Parameter(Mandatory = $true)][string]$RepositoryCommit,
-  [string]$RepositoryUrl = "https://github.com/hash066/ProofGate.git"
+  [string]$RepositoryUrl = "https://github.com/hash066/ProofGate.git",
+  [string]$AdminUrl = "https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,9 @@ if ($RepositoryCommit -notmatch '^[a-f0-9]{40}$') {
 }
 if ($RepositoryUrl -notmatch '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?$') {
   throw "RepositoryUrl must be an explicit HTTPS GitHub repository."
+}
+if ($AdminUrl -notmatch '^https://[a-z0-9.-]+\.workers\.dev/?$') {
+  throw "AdminUrl must be the named workers.dev origin."
 }
 if ($Region -notmatch '^[a-z]{2}-[a-z]+-\d$' -or $StackName -notmatch '^[A-Za-z][A-Za-z0-9-]{2,127}$') {
   throw "Region or StackName is invalid."
@@ -65,7 +69,10 @@ $commands = @(
   "printf '%s\n' 'HERMES_RELAY_QUEUE_URL=$relayQueue' | sudo tee /etc/proofgate/relay.env >/dev/null",
   "sudo chown root:proofgate /etc/proofgate/relay.env && sudo chmod 0640 /etc/proofgate/relay.env",
   "if sudo grep -q '^HERMES_PROXY_SECRET=.' /etc/proofgate/origin.env; then sudo HERMES_RELAY_SECRET_ARN='$relaySecretArn' node /opt/proofgate/ProofGate/infra/aws/sync-relay-secret.mjs; fi",
-  "sudo systemctl restart proofgate-hermes-relay.service"
+  "sudo systemctl restart proofgate-hermes-relay.service",
+  "sudo env PROOFGATE_ADMIN_SECRET_ARN='$adminSecretArn' PROOFGATE_ADMIN_URL='$AdminUrl' node /opt/proofgate/ProofGate/infra/aws/sync-hermes-admin-secret.mjs",
+  "sudo systemctl restart axcas-tool-bridge.service",
+  "sudo systemctl restart proofgate-hermes-gateway.service"
 )
 $parameters = @{ commands = $commands } | ConvertTo-Json -Compress
 $commandId = aws ssm send-command --region $Region --instance-ids $instanceId --document-name AWS-RunShellScript --parameters $parameters --query "Command.CommandId" --output text

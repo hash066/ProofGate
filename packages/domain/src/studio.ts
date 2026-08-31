@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BusinessBriefInputSchema } from "./growth";
 
 const safeText = z.string().trim().min(1).max(500).refine(
   (value) => !/[<>]|javascript:/i.test(value),
@@ -11,6 +12,7 @@ const e164 = z.string().regex(/^\+[1-9]\d{7,14}$/);
 
 export const StudioIntentSchema = z.enum(["website", "reels", "both"]);
 export type StudioIntent = z.infer<typeof StudioIntentSchema>;
+export const MAX_STUDIO_OFFERINGS = 24;
 
 export const SiteStyleSchema = z.enum(["minimal", "editorial", "catalog", "services", "portfolio"]);
 export const ReelTemplateIdSchema = z.enum([
@@ -117,7 +119,7 @@ export const StudioProjectInputSchema = z.object({
   fulfillmentArea: safeText.optional(),
   leadTime: safeText.optional(),
   timezone: safeText.optional(),
-  offerings: z.array(StudioOfferingSchema).min(1).max(24).optional(),
+  offerings: z.array(StudioOfferingSchema).min(1).max(MAX_STUDIO_OFFERINGS).optional(),
   suppliedClaims: z.array(safeText).max(20).default([]),
   layerOverrides: z.object({
     hook: safeText,
@@ -135,6 +137,15 @@ export const StudioProjectInputSchema = z.object({
   }
 });
 export type StudioProjectInput = z.infer<typeof StudioProjectInputSchema>;
+
+// Product metadata belongs beside the typed brief, not inside merchant prose. This
+// envelope lets WhatsApp preserve the selected outcome and active project while the
+// underlying BusinessBrief remains strict and channel-independent.
+export const StudioIntakeInputSchema = BusinessBriefInputSchema.extend({
+  projectId: identifier.optional(),
+  projectIntent: StudioIntentSchema.optional(),
+}).strict();
+export type StudioIntakeInput = z.infer<typeof StudioIntakeInputSchema>;
 
 export type ApprovalChecklistInput = {
   type: "release" | "call_batch" | "reel" | "social_campaign";

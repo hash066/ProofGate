@@ -2,3 +2,28 @@ model:
   default: moonshotai/Kimi-K2.6
   provider: openai-api
   base_url: https://api.studio.nebius.ai/v1
+
+# This is a public customer channel, not a personal-assistant installation.
+# All product mutations cross the typed Axcas plugin; no general host tools are
+# available to WhatsApp conversations.
+platform_toolsets:
+  whatsapp: [axcas]
+  whatsapp_cloud: [axcas]
+
+plugins:
+  enabled: [axcas]
+
+platforms:
+  whatsapp:
+    extra:
+      # A non-matching sentinel activates Hermes' non-admin slash-command gate.
+      # Customer sessions retain only Hermes' built-in /help and /whoami floor.
+      allow_admin_from: ["__operator_access_disabled__"]
+      user_allowed_commands: []
+  whatsapp_cloud:
+    extra:
+      allow_admin_from: ["__operator_access_disabled__"]
+      user_allowed_commands: []
+
+security:
+  redact_secrets: true

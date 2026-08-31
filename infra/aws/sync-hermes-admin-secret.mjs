@@ -10,19 +10,28 @@ const response = await new SecretsManagerClient({}).send(new GetSecretValueComma
 const serviceSecret = response.SecretString;
 if (!serviceSecret || serviceSecret.length < 32 || /[\r\n]/.test(serviceSecret)) throw new Error("admin service secret is invalid");
 
-const envPath = "/etc/proofgate/hermes.env";
-const current = await readFile(envPath, "utf8");
-const metadata = await stat(envPath);
 const upsert = (text, name, value) => {
   const line = `${name}=${value}`;
   const pattern = new RegExp(`^${name}=.*$`, "m");
   return pattern.test(text) ? text.replace(pattern, line) : `${text.replace(/\s*$/, "")}\n${line}\n`;
 };
-const next = upsert(upsert(current, "PROOFGATE_ADMIN_URL", adminUrl.replace(/\/$/, "")), "PROOFGATE_SERVICE_SECRET", serviceSecret);
-const temporaryPath = `${envPath}.${process.pid}.tmp`;
-await writeFile(temporaryPath, next, { mode: metadata.mode & 0o777 });
-await chmod(temporaryPath, metadata.mode & 0o777);
-await chown(temporaryPath, metadata.uid, metadata.gid);
-await rename(temporaryPath, envPath);
 
-console.info(JSON.stringify({ synced: true, secretArn }));
+const syncEnvironment = async (envPath) => {
+  const current = await readFile(envPath, "utf8");
+  const metadata = await stat(envPath);
+  const next = upsert(
+    upsert(current, "PROOFGATE_ADMIN_URL", adminUrl.replace(/\/$/, "")),
+    "PROOFGATE_SERVICE_SECRET",
+    serviceSecret,
+  );
+  const temporaryPath = `${envPath}.${process.pid}.tmp`;
+  await writeFile(temporaryPath, next, { mode: metadata.mode & 0o777 });
+  await chmod(temporaryPath, metadata.mode & 0o777);
+  await chown(temporaryPath, metadata.uid, metadata.gid);
+  await rename(temporaryPath, envPath);
+};
+
+await syncEnvironment("/etc/proofgate/axcas-tool-bridge.env");
+await syncEnvironment("/etc/proofgate/hermes.env");
+
+console.info(JSON.stringify({ synced: true }));
