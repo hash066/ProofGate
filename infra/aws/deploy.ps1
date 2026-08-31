@@ -3,7 +3,8 @@ param(
   [string]$StackName = "proofgate-foundation",
   [Parameter(Mandatory = $true)][string]$RepositoryCommit,
   [string]$RepositoryUrl = "https://github.com/hash066/ProofGate.git",
-  [string]$AdminUrl = "https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev"
+  [string]$AdminUrl = "https://proofgate-whatsapp-growth.proofgate-harshita.workers.dev",
+  [string]$OperatorAlertEmail = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +18,9 @@ if ($RepositoryUrl -notmatch '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-
 }
 if ($AdminUrl -notmatch '^https://[a-z0-9.-]+\.workers\.dev/?$') {
   throw "AdminUrl must be the named workers.dev origin."
+}
+if ($OperatorAlertEmail -and $OperatorAlertEmail -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+  throw "OperatorAlertEmail must be a valid email address."
 }
 if ($Region -notmatch '^[a-z]{2}-[a-z]+-\d$' -or $StackName -notmatch '^[A-Za-z][A-Za-z0-9-]{2,127}$') {
   throw "Region or StackName is invalid."
@@ -33,21 +37,29 @@ if ($LASTEXITCODE -ne 0) { throw "AWS identity check failed." }
 aws cloudformation validate-template --template-body "file://$template" --region $Region | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "CloudFormation validation failed." }
 
-aws cloudformation deploy `
-  --stack-name $StackName `
-  --template-file $template `
-  --capabilities CAPABILITY_IAM `
-  --region $Region `
-  --no-fail-on-empty-changeset
+$deployArguments = @(
+  "cloudformation", "deploy",
+  "--stack-name", $StackName,
+  "--template-file", $template,
+  "--capabilities", "CAPABILITY_IAM",
+  "--region", $Region,
+  "--no-fail-on-empty-changeset"
+)
+if ($OperatorAlertEmail) {
+  $deployArguments += @("--parameter-overrides", "ParameterKey=OperatorAlertEmail,ParameterValue=$OperatorAlertEmail")
+}
+& aws @deployArguments
 if ($LASTEXITCODE -ne 0) { throw "CloudFormation deployment failed." }
 
 $instanceId = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue" --output text
 $bucket = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RecordingsBucketName'].OutputValue" --output text
+$merchantMediaBucket = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='MerchantMediaBucketName'].OutputValue" --output text
+$operationsTopicArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='OperationsAlertTopicArn'].OutputValue" --output text
 $relayOrigin = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayOriginUrl'].OutputValue" --output text
 $relayQueue = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelayQueueUrl'].OutputValue" --output text
 $relaySecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='RelaySecretArn'].OutputValue" --output text
 $adminSecretArn = aws cloudformation describe-stacks --stack-name $StackName --region $Region --query "Stacks[0].Outputs[?OutputKey=='AdminSecretArn'].OutputValue" --output text
-if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:' -or $adminSecretArn -notmatch '^arn:') {
+if ($LASTEXITCODE -ne 0 -or $instanceId -notmatch '^i-[a-f0-9]+$' -or [string]::IsNullOrWhiteSpace($bucket) -or [string]::IsNullOrWhiteSpace($merchantMediaBucket) -or $operationsTopicArn -notmatch '^arn:' -or $relayOrigin -notmatch '^https://[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws\.com$' -or $relayQueue -notmatch '^https://sqs\.[a-z0-9-]+\.amazonaws\.com/' -or $relaySecretArn -notmatch '^arn:' -or $adminSecretArn -notmatch '^arn:') {
   throw "Stack outputs are incomplete."
 }
 
@@ -88,6 +100,8 @@ if ($LASTEXITCODE -ne 0 -or $status -ne "Success") { throw "Runtime installation
   Region = $Region
   InstanceId = $instanceId
   RecordingsBucket = $bucket
+  MerchantMediaBucket = $merchantMediaBucket
+  OperationsAlertTopicArn = $operationsTopicArn
   RelayOriginUrl = $relayOrigin
   RelayQueueUrl = $relayQueue
   AdminSecretArn = $adminSecretArn

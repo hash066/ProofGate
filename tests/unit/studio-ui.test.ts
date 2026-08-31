@@ -52,4 +52,48 @@ describe("Axcas Studio visual editor", () => {
     expect(html).not.toContain("HTML editor");
     expect(css).toContain(".builder-shell");
   });
+
+  it("starts a separate guided project without exposing a template or code choice", () => {
+    const dom = new JSDOM(renderStudio(), { runScripts: "outside-only", url: "https://axcas.test/studio" });
+    const window = (dom as { window: Window & typeof globalThis }).window;
+    Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", { value: vi.fn() });
+    Object.defineProperty(window.URL, "createObjectURL", { value: vi.fn(() => "blob:https://axcas.test/preview") });
+    Object.defineProperty(window.URL, "revokeObjectURL", { value: vi.fn() });
+    Object.defineProperty(window, "fetch", { value: vi.fn(async () => ({ ok: false, status: 401 })) });
+    window.eval(renderStudioClientJs());
+
+    window.document.querySelector<HTMLButtonElement>("#newProjectButton")!.click();
+    expect(window.document.querySelector("#newProjectPanel")!.classList.contains("hidden")).toBe(false);
+    window.document.querySelector<HTMLButtonElement>('[data-new-intent="reels"]')!.click();
+
+    expect(window.document.querySelector<HTMLInputElement>('input[name="intent"][value="reels"]')!.checked).toBe(true);
+    expect(window.document.querySelector<HTMLFormElement>("#projectForm")!.dataset.projectId).toBe("");
+    expect(window.document.querySelector("#versionCue")!.textContent).toBe("New draft");
+    expect(renderStudio()).not.toContain("API key");
+  });
+
+  it("shows linked browsers in plain language without exposing the session credential", async () => {
+    const dom = new JSDOM(renderStudio(), { runScripts: "outside-only", url: "https://axcas.test/studio" });
+    const window = (dom as { window: Window & typeof globalThis }).window;
+    Object.defineProperty(window.HTMLElement.prototype, "scrollIntoView", { value: vi.fn() });
+    Object.defineProperty(window.URL, "createObjectURL", { value: vi.fn(() => "blob:https://axcas.test/preview") });
+    Object.defineProperty(window.URL, "revokeObjectURL", { value: vi.fn() });
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      if (String(input) === "/api/studio/sessions") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ sessions: [{ deviceId: "device-private-1", current: true, createdAt: 1_780_000_000_000, expiresAt: 1_782_592_000_000 }] }),
+        };
+      }
+      return { ok: false, status: 401, json: async () => ({}) };
+    });
+    Object.defineProperty(window, "fetch", { value: fetch });
+    window.eval(renderStudioClientJs());
+
+    window.document.querySelector<HTMLButtonElement>("#manageAccessButton")!.click();
+    await vi.waitFor(() => expect(window.document.querySelector("#sessionList")!.textContent).toContain("This browser"));
+    expect(window.document.querySelector("#sessionList")!.textContent).not.toContain("device-private-1");
+    expect(fetch).toHaveBeenCalledWith("/api/studio/sessions", { cache: "no-store" });
+  });
 });

@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { action, internalMutation, mutation, query } from "./_generated/server";
 import { assertImmutableAssetRegistration, validateStoredAssetMetadata } from "./asset_policy";
+import { FOUNDING_BETA_PLAN, aggregateBillableUsage, evaluateQuota, usagePeriodStart, type UsageEntry, type UsageMetric } from "../packages/domain/src/usage";
 
 function requireServiceSecret(value: string) {
   const expected = process.env.PROOFGATE_SERVICE_SECRET;
@@ -122,6 +123,76 @@ export const adminRevokeStudioSession = action({
   handler: async (context, args): Promise<{ revoked: boolean }> => {
     requireServiceSecret(args.serviceSecret);
     return context.runMutation(internal.growth.revokeStudioSessionInternal, { sessionHash: args.sessionHash, now: args.now });
+  },
+});
+
+export const adminListStudioSessions = query({
+  args: { serviceSecret: v.string(), merchantId: v.string(), currentSessionHash: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const sessions = await context.db.query("studioSessions").withIndex("by_merchant", (range) => range.eq("merchantId", args.merchantId)).collect();
+    return sessions
+      .filter((session) => !session.revokedAt && session.expiresAt >= args.now)
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .map((session) => ({
+        deviceId: session.sessionHash.slice(0, 24),
+        createdAt: session.createdAt,
+        expiresAt: session.expiresAt,
+        current: session.sessionHash === args.currentSessionHash,
+      }));
+  },
+});
+
+export const revokeStudioDeviceInternal = internalMutation({
+  args: { merchantId: v.string(), deviceId: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    const sessions = await context.db.query("studioSessions").withIndex("by_merchant", (range) => range.eq("merchantId", args.merchantId)).collect();
+    const matches = sessions.filter((session) => session.sessionHash.startsWith(args.deviceId));
+    if (matches.length !== 1 || matches[0].revokedAt) return { revoked: false };
+    await context.db.patch(matches[0]._id, { revokedAt: args.now });
+    return { revoked: true };
+  },
+});
+
+export const adminRevokeStudioDevice = action({
+  args: { serviceSecret: v.string(), merchantId: v.string(), deviceId: v.string(), now: v.number() },
+  handler: async (context, args): Promise<{ revoked: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    return context.runMutation(internal.growth.revokeStudioDeviceInternal, {
+      merchantId: args.merchantId, deviceId: args.deviceId, now: args.now,
+    });
+  },
+});
+
+export const createStudioDataRequestInternal = internalMutation({
+  args: {
+    requestId: v.string(), merchantId: v.string(),
+    type: v.union(v.literal("export"), v.literal("deletion")),
+    dueBy: v.number(), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const sameId = await context.db.query("studioDataRequests").withIndex("by_request_id", (range) => range.eq("requestId", args.requestId)).unique();
+    if (sameId) {
+      if (sameId.merchantId !== args.merchantId || sameId.type !== args.type || sameId.dueBy !== args.dueBy) throw new Error("immutable Studio data request conflict");
+      return { requestId: sameId.requestId, status: sameId.status, dueBy: sameId.dueBy, created: false };
+    }
+    const open = (await context.db.query("studioDataRequests").withIndex("by_merchant_type", (range) => range.eq("merchantId", args.merchantId).eq("type", args.type)).order("desc").collect())[0];
+    if (open) return { requestId: open.requestId, status: open.status, dueBy: open.dueBy, created: false };
+    await context.db.insert("studioDataRequests", { ...args, status: "requested" });
+    return { requestId: args.requestId, status: "requested" as const, dueBy: args.dueBy, created: true };
+  },
+});
+
+export const adminCreateStudioDataRequest = action({
+  args: {
+    serviceSecret: v.string(), requestId: v.string(), merchantId: v.string(),
+    type: v.union(v.literal("export"), v.literal("deletion")),
+    dueBy: v.number(), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ requestId: string; status: "requested"; dueBy: number; created: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.createStudioDataRequestInternal, record);
   },
 });
 
@@ -426,19 +497,38 @@ export const ingestVapiReport = mutation({
     if (!providerCallId || !batchId || !leadId) return { accepted: false };
     const existing = await context.db.query("callOutcomes").withIndex("by_provider_call_id", (range) => range.eq("providerCallId", providerCallId)).unique();
     if (existing) return { accepted: true };
+    const batch = await context.db.query("callBatches").withIndex("by_batch_id", (range) => range.eq("batchId", batchId)).unique();
+    if (!batch || !batch.leadIds.includes(leadId)) return { accepted: false };
     const structured = message.analysis?.structuredData ?? {};
     const consent = message.compliance?.recordingConsent?.grantedAt ? "granted" : structured.recordingConsent === "declined" ? "declined" : "not_reached";
     const outcomeValues = new Set(["qualified", "not_interested", "no_answer", "failed", "do_not_call"]);
     const outcome = outcomeValues.has(structured.outcome) ? structured.outcome : "failed";
     const doNotCall = Boolean(structured.doNotCall || outcome === "do_not_call");
+    const costUsd = typeof message.cost === "number" && message.cost >= 0 ? message.cost : 0;
+    const completedAt = Number.isFinite(Date.parse(message.endedAt)) ? Date.parse(message.endedAt) : Date.now();
     await context.db.insert("callOutcomes", {
       providerCallId, batchId, leadId, recordingConsent: consent, outcome,
       interest: optionalString(structured.interest), timing: optionalString(structured.timing), product: optionalString(structured.product),
       objection: optionalString(structured.objection), followUpRequested: Boolean(structured.followUpRequested), doNotCall,
-      costUsd: typeof message.cost === "number" && message.cost >= 0 ? message.cost : 0,
+      costUsd,
       artifactRef: optionalString(message.call?.metadata?.artifactRef),
-      completedAt: Number.isFinite(Date.parse(message.endedAt)) ? Date.parse(message.endedAt) : Date.now(),
+      completedAt,
     });
+    const outcomes = await context.db.query("callOutcomes").withIndex("by_batch", (range) => range.eq("batchId", batchId)).collect();
+    const completedLeadIds = new Set(outcomes.map((entry) => entry.leadId));
+    if (batch.leadIds.every((id) => completedLeadIds.has(id))) {
+      const usageIdempotencyKey = `actual:call-batch:${batchId}`;
+      const recorded = await context.db.query("usageEntries").withIndex("by_idempotency_key", (range) => range.eq("idempotencyKey", usageIdempotencyKey)).unique();
+      if (!recorded) {
+        const totalMicrousd = outcomes.reduce((sum, entry) => sum + Math.round(entry.costUsd * 1_000_000), 0);
+        await context.db.insert("usageEntries", {
+          usageEntryId: usageIdempotencyKey, idempotencyKey: usageIdempotencyKey,
+          operationId: `call-batch:${batchId}`, merchantId: batch.merchantId, metric: "call_cost_microusd",
+          quantity: totalMicrousd, basis: "actual", periodStart: usagePeriodStart("call_cost_microusd", completedAt),
+          evidenceRef: `vapi-batch:${outcomes.map((entry) => entry.providerCallId).sort().join(",")}`, createdAt: completedAt,
+        });
+      }
+    }
     if (doNotCall) {
       const lead = await context.db.query("leadConsents").withIndex("by_lead_id", (range) => range.eq("leadId", leadId)).unique();
       if (lead && !lead.revokedAt) await context.db.patch(lead._id, { revokedAt: Date.now() });
@@ -948,5 +1038,158 @@ export const adminGetReelStatus = query({
     const reel = await context.db.query("reelPlans").withIndex("by_reel_id", (range) => range.eq("reelId", args.reelId)).unique();
     if (!reel || reel.merchantId !== args.merchantId) return null;
     return { status: reel.status, renderedAssetId: reel.renderedAssetId };
+  },
+});
+
+const usageMetricValidator = v.union(
+  v.literal("model_turns"), v.literal("whatsapp_messages"), v.literal("storage_bytes"),
+  v.literal("render_seconds"), v.literal("polly_characters"), v.literal("call_cost_microusd"),
+);
+
+function assignmentLimit(assignment: any, metric: UsageMetric): number {
+  if (!assignment) return FOUNDING_BETA_PLAN.limits[metric];
+  const fields: Record<UsageMetric, string> = {
+    model_turns: "modelTurnsLimit", whatsapp_messages: "whatsappMessagesLimit", storage_bytes: "storageBytesLimit",
+    render_seconds: "renderSecondsLimit", polly_characters: "pollyCharactersLimit", call_cost_microusd: "callCostMicrousdLimit",
+  };
+  return assignment[fields[metric]];
+}
+
+export const assignTenantPlanInternal = internalMutation({
+  args: {
+    assignmentId: v.string(), merchantId: v.string(), planCode: v.string(), modelTurnsLimit: v.number(),
+    whatsappMessagesLimit: v.number(), storageBytesLimit: v.number(), renderSecondsLimit: v.number(),
+    pollyCharactersLimit: v.number(), callCostMicrousdLimit: v.number(), effectiveAt: v.number(), createdAt: v.number(),
+  },
+  handler: async (context, args) => {
+    const limits = [args.modelTurnsLimit, args.whatsappMessagesLimit, args.storageBytesLimit, args.renderSecondsLimit, args.pollyCharactersLimit, args.callCostMicrousdLimit];
+    if (limits.some((limit) => !Number.isSafeInteger(limit) || limit < 0)) throw new Error("tenant plan limits must be non-negative integers");
+    const existing = await context.db.query("tenantPlanAssignments").withIndex("by_assignment_id", (range) => range.eq("assignmentId", args.assignmentId)).unique();
+    if (existing) {
+      const matches = Object.entries(args).every(([key, value]) => (existing as any)[key] === value);
+      if (!matches) throw new Error("tenant plan assignment is immutable");
+      return { inserted: false };
+    }
+    await context.db.insert("tenantPlanAssignments", args);
+    return { inserted: true };
+  },
+});
+
+export const adminAssignTenantPlan = action({
+  args: {
+    serviceSecret: v.string(), assignmentId: v.string(), merchantId: v.string(), planCode: v.string(), modelTurnsLimit: v.number(),
+    whatsappMessagesLimit: v.number(), storageBytesLimit: v.number(), renderSecondsLimit: v.number(),
+    pollyCharactersLimit: v.number(), callCostMicrousdLimit: v.number(), effectiveAt: v.number(), createdAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ inserted: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.assignTenantPlanInternal, record);
+  },
+});
+
+export const reserveUsageInternal = internalMutation({
+  args: {
+    merchantId: v.string(), operationId: v.string(), idempotencyKey: v.string(), requestedAt: v.number(),
+    reservations: v.array(v.object({ metric: usageMetricValidator, quantity: v.number() })),
+  },
+  handler: async (context, args) => {
+    if (!args.reservations.length || args.reservations.some(({ quantity }) => !Number.isSafeInteger(quantity) || quantity <= 0)) throw new Error("invalid usage reservation");
+    if (new Set(args.reservations.map(({ metric }) => metric)).size !== args.reservations.length) throw new Error("duplicate usage metric");
+    const requestsJson = JSON.stringify(args.reservations);
+    const prior = await context.db.query("usageQuotaChecks").withIndex("by_idempotency_key", (range) => range.eq("idempotencyKey", args.idempotencyKey)).unique();
+    if (prior) {
+      if (prior.merchantId !== args.merchantId || prior.operationId !== args.operationId || prior.requestsJson !== requestsJson) throw new Error("usage idempotency conflict");
+      return { allowed: prior.allowed, blockingMetric: prior.blockingMetric };
+    }
+    const assignments = await context.db.query("tenantPlanAssignments").withIndex("by_merchant_effective", (range) => range.eq("merchantId", args.merchantId).lte("effectiveAt", args.requestedAt)).collect();
+    const assignment = assignments.sort((left, right) => right.effectiveAt - left.effectiveAt)[0];
+    let blockingMetric: UsageMetric | undefined;
+    for (const request of args.reservations) {
+      const periodStart = usagePeriodStart(request.metric, args.requestedAt);
+      const stored = await context.db.query("usageEntries").withIndex("by_merchant_metric_period", (range) => range.eq("merchantId", args.merchantId).eq("metric", request.metric).eq("periodStart", periodStart)).collect();
+      const entries = stored.map((entry) => ({ schemaVersion: 1 as const, ...entry })) as unknown as UsageEntry[];
+      const result = evaluateQuota({ used: aggregateBillableUsage(entries), requested: request.quantity, limit: assignmentLimit(assignment, request.metric) });
+      if (!result.allowed) { blockingMetric = request.metric; break; }
+    }
+    const allowed = !blockingMetric;
+    await context.db.insert("usageQuotaChecks", {
+      checkId: `quota:${args.idempotencyKey}`, idempotencyKey: args.idempotencyKey, merchantId: args.merchantId,
+      operationId: args.operationId, requestsJson, allowed, blockingMetric, createdAt: args.requestedAt,
+    });
+    if (allowed) {
+      for (const request of args.reservations) {
+        await context.db.insert("usageEntries", {
+          usageEntryId: `usage:${args.idempotencyKey}:${request.metric}`, idempotencyKey: `${args.idempotencyKey}:${request.metric}`,
+          operationId: args.operationId, merchantId: args.merchantId, metric: request.metric, quantity: request.quantity,
+          basis: "reserved", periodStart: usagePeriodStart(request.metric, args.requestedAt), createdAt: args.requestedAt,
+        });
+      }
+    }
+    return { allowed, blockingMetric };
+  },
+});
+
+export const adminReserveUsage = action({
+  args: {
+    serviceSecret: v.string(), merchantId: v.string(), operationId: v.string(), idempotencyKey: v.string(), requestedAt: v.number(),
+    reservations: v.array(v.object({ metric: usageMetricValidator, quantity: v.number() })),
+  },
+  handler: async (context, args): Promise<{ allowed: boolean; blockingMetric?: UsageMetric }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.reserveUsageInternal, record);
+  },
+});
+
+export const recordActualUsageInternal = internalMutation({
+  args: {
+    usageEntryId: v.string(), idempotencyKey: v.string(), operationId: v.string(), merchantId: v.string(),
+    metric: usageMetricValidator, quantity: v.number(), evidenceRef: v.string(), occurredAt: v.number(),
+  },
+  handler: async (context, args) => {
+    if (!Number.isSafeInteger(args.quantity) || args.quantity < 0 || !args.evidenceRef.trim()) throw new Error("actual usage requires a valid quantity and evidence");
+    const prior = await context.db.query("usageEntries").withIndex("by_idempotency_key", (range) => range.eq("idempotencyKey", args.idempotencyKey)).unique();
+    if (prior) {
+      if (prior.merchantId !== args.merchantId || prior.operationId !== args.operationId || prior.metric !== args.metric || prior.quantity !== args.quantity || prior.evidenceRef !== args.evidenceRef || prior.basis !== "actual") throw new Error("usage idempotency conflict");
+      return { inserted: false };
+    }
+    await context.db.insert("usageEntries", {
+      usageEntryId: args.usageEntryId, idempotencyKey: args.idempotencyKey, operationId: args.operationId,
+      merchantId: args.merchantId, metric: args.metric, quantity: args.quantity, basis: "actual",
+      periodStart: usagePeriodStart(args.metric, args.occurredAt), evidenceRef: args.evidenceRef, createdAt: args.occurredAt,
+    });
+    return { inserted: true };
+  },
+});
+
+export const adminRecordActualUsage = action({
+  args: {
+    serviceSecret: v.string(), usageEntryId: v.string(), idempotencyKey: v.string(), operationId: v.string(), merchantId: v.string(),
+    metric: usageMetricValidator, quantity: v.number(), evidenceRef: v.string(), occurredAt: v.number(),
+  },
+  handler: async (context, args): Promise<{ inserted: boolean }> => {
+    requireServiceSecret(args.serviceSecret);
+    const { serviceSecret: _secret, ...record } = args;
+    return context.runMutation(internal.growth.recordActualUsageInternal, record);
+  },
+});
+
+export const adminUsageSummary = query({
+  args: { serviceSecret: v.string(), merchantId: v.string(), now: v.number() },
+  handler: async (context, args) => {
+    requireServiceSecret(args.serviceSecret);
+    const assignments = await context.db.query("tenantPlanAssignments").withIndex("by_merchant_effective", (range) => range.eq("merchantId", args.merchantId).lte("effectiveAt", args.now)).collect();
+    const assignment = assignments.sort((left, right) => right.effectiveAt - left.effectiveAt)[0];
+    const metrics: UsageMetric[] = ["model_turns", "whatsapp_messages", "storage_bytes", "render_seconds", "polly_characters", "call_cost_microusd"];
+    const usage: Record<string, { used: number; limit: number; remaining: number }> = {};
+    for (const metric of metrics) {
+      const periodStart = usagePeriodStart(metric, args.now);
+      const stored = await context.db.query("usageEntries").withIndex("by_merchant_metric_period", (range) => range.eq("merchantId", args.merchantId).eq("metric", metric).eq("periodStart", periodStart)).collect();
+      const used = aggregateBillableUsage(stored.map((entry) => ({ schemaVersion: 1 as const, ...entry })) as unknown as UsageEntry[]);
+      const limit = assignmentLimit(assignment, metric);
+      usage[metric] = { used, limit, remaining: Math.max(0, limit - used) };
+    }
+    return { merchantId: args.merchantId, planCode: assignment?.planCode ?? FOUNDING_BETA_PLAN.planCode, through: args.now, usage };
   },
 });

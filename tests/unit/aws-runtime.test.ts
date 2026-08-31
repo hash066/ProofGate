@@ -93,6 +93,57 @@ describe("AWS Hermes runtime assets", () => {
     expect(template).toContain("RelayQueueUrl:");
   });
 
+  it("separates durable merchant media from expiring consented call recordings", async () => {
+    const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
+
+    expect(template).toContain("MerchantMediaBucket:");
+    expect(template).toContain("MerchantMediaBucketPolicy:");
+    expect(template).toContain("MerchantMediaBucketName:");
+    expect(template).toContain("BucketOwnerEnforced");
+    expect(template).toContain("ExpireUnselectedIngestAfter30Days");
+    expect(template).toContain("ExpireGeneratedRendersAfter90Days");
+    expect(template).toContain("AbortIncompleteMerchantMediaUploads");
+    expect(template).toMatch(/MerchantMediaBucket:[\s\S]*?DeletionPolicy: Retain/);
+    expect(template).toMatch(/RecordingsBucket:[\s\S]*?DeleteConsentedRecordingsAfter30Days/);
+    expect(template).toContain("PolicyName: AxcasConsentedCallRecordings");
+    expect(template).toContain("PolicyName: AxcasPrivateMerchantMedia");
+    expect(template).toContain("- !Sub '${MerchantMediaBucket.Arn}/private/*'");
+    expect(template).toContain("- !Sub '${MerchantMediaBucket.Arn}/published/*'");
+    expect(template).toContain("Resource: !Sub '${RecordingsBucket.Arn}/*'");
+  });
+
+  it("alarms on relay failure and notifies an operator-owned SNS topic", async () => {
+    const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
+    const deploy = await readFile("infra/aws/deploy.ps1", "utf8");
+
+    expect(template).toContain("OperatorAlertEmail:");
+    expect(template).toContain("OperationsAlertTopic:");
+    expect(template).toContain("OperationsEmailSubscription:");
+    expect(template).toContain("HermesRelayDeadLetterAlarm:");
+    expect(template).toContain("MetricName: ApproximateNumberOfMessagesVisible");
+    expect(template).toContain("HermesRelayQueueAgeAlarm:");
+    expect(template).toContain("MetricName: ApproximateAgeOfOldestMessage");
+    expect(template).toContain("HermesRelayLambdaErrorsAlarm:");
+    expect(template).toContain("MetricName: Errors");
+    expect(template).toContain("TreatMissingData: notBreaching");
+    expect(template).toContain("OperationsAlertTopicArn:");
+    expect(deploy).toContain('[string]$OperatorAlertEmail');
+    expect(deploy).toContain('ParameterKey=OperatorAlertEmail');
+    expect(deploy).toContain("OutputKey=='OperationsAlertTopicArn'");
+    expect(deploy).toContain("OutputKey=='MerchantMediaBucketName'");
+  });
+
+  it("alerts on instance failure and automatically recovers supported system failures", async () => {
+    const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
+
+    expect(template).toContain("HermesSystemStatusAlarm:");
+    expect(template).toContain("MetricName: StatusCheckFailed_System");
+    expect(template).toContain("HermesInstanceStatusAlarm:");
+    expect(template).toContain("MetricName: StatusCheckFailed_Instance");
+    expect(template).toContain("arn:${AWS::Partition}:automate:${AWS::Region}:ec2:recover");
+    expect(template).toMatch(/HermesSystemStatusAlarm:[\s\S]*?AlarmActions:[\s\S]*?ec2:recover/);
+  });
+
   it("keeps the Hermes admin credential in Secrets Manager and syncs it without printing", async () => {
     const template = await readFile("infra/aws/cloudformation.yaml", "utf8");
     const syncScript = await readFile("infra/aws/sync-hermes-admin-secret.mjs", "utf8");
@@ -176,7 +227,8 @@ describe("AWS Hermes runtime assets", () => {
     const deploy = await readFile("infra/aws/deploy.ps1", "utf8");
     expect(deploy).toContain("aws sts get-caller-identity");
     expect(deploy).toContain("aws cloudformation validate-template");
-    expect(deploy).toContain("aws cloudformation deploy");
+    expect(deploy).toContain('"cloudformation", "deploy"');
+    expect(deploy).toContain("& aws @deployArguments");
     expect(deploy).toContain("aws ssm send-command");
     expect(deploy).toContain("aws ssm wait command-executed");
     expect(deploy).toContain("raw.githubusercontent.com");

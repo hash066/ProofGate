@@ -1,10 +1,30 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ProofGate Hermes/FFmpeg host and private 30-day call-recording storage
+Description: Axcas Hermes/FFmpeg host, durable relay, operational alarms, and isolated private storage
 Parameters:
   UbuntuAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+  OperatorAlertEmail:
+    Type: String
+    Default: ''
+    Description: Optional operator email for CloudWatch alarm notifications; confirmation is required.
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    ConstraintDescription: Must be empty or a valid operator email address.
+Conditions:
+  HasOperatorAlertEmail: !Not [!Equals [!Ref OperatorAlertEmail, '']]
 Resources:
+  OperationsAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Axcas operations alerts
+      TopicName: !Sub '${AWS::StackName}-operations-alerts'
+  OperationsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasOperatorAlertEmail
+    Properties:
+      Endpoint: !Ref OperatorAlertEmail
+      Protocol: email
+      TopicArn: !Ref OperationsAlertTopic
   HermesRelayDeadLetterQueue:
     Type: AWS::SQS::Queue
     Properties:
@@ -20,6 +40,46 @@ Resources:
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt HermesRelayDeadLetterQueue.Arn
         maxReceiveCount: 5
+  HermesRelayDeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: A WhatsApp relay message exhausted retries and requires operator review.
+      AlarmName: !Sub '${AWS::StackName}-relay-dead-letter'
+      ActionsEnabled: true
+      AlarmActions: [!Ref OperationsAlertTopic]
+      OKActions: [!Ref OperationsAlertTopic]
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt HermesRelayDeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+  HermesRelayQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: WhatsApp relay delivery has remained delayed for at least two minutes.
+      AlarmName: !Sub '${AWS::StackName}-relay-oldest-message'
+      ActionsEnabled: true
+      AlarmActions: [!Ref OperationsAlertTopic]
+      OKActions: [!Ref OperationsAlertTopic]
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt HermesRelayQueue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 120
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
   HermesRelayProxySecret:
     Type: AWS::SecretsManager::Secret
     Properties:
@@ -121,6 +181,26 @@ Resources:
               }
               result = queue.send_message(QueueUrl=os.environ["RELAY_QUEUE_URL"], MessageBody=json.dumps(envelope, separators=(",", ":")))
               return reply(202, {"accepted": True, "requestId": context.aws_request_id, "messageId": result["MessageId"]})
+  HermesRelayLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The authenticated WhatsApp relay Lambda returned an unhandled error.
+      AlarmName: !Sub '${AWS::StackName}-relay-lambda-errors'
+      ActionsEnabled: true
+      AlarmActions: [!Ref OperationsAlertTopic]
+      OKActions: [!Ref OperationsAlertTopic]
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref HermesRelayFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
   HermesRelayApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -161,10 +241,15 @@ Resources:
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HermesRelayApi}/*/*'
   RecordingsBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -177,6 +262,70 @@ Resources:
             ExpirationInDays: 30
             NoncurrentVersionExpiration: { NoncurrentDays: 30 }
       VersioningConfiguration: { Status: Enabled }
+  RecordingsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RecordingsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureRecordingTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt RecordingsBucket.Arn
+              - !Sub '${RecordingsBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': false }
+  MerchantMediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireUnselectedIngestAfter30Days
+            Prefix: private/ingest/
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration: { NoncurrentDays: 7 }
+          - Id: ExpireGeneratedRendersAfter90Days
+            Prefix: private/renders/
+            Status: Enabled
+            ExpirationInDays: 90
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 }
+          - Id: AbortIncompleteMerchantMediaUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+      VersioningConfiguration: { Status: Enabled }
+  MerchantMediaBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref MerchantMediaBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureMerchantMediaTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt MerchantMediaBucket.Arn
+              - !Sub '${MerchantMediaBucket.Arn}/*'
+            Condition:
+              Bool: { 'aws:SecureTransport': false }
   HermesRole:
     Type: AWS::IAM::Role
     Properties:
@@ -189,16 +338,42 @@ Resources:
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
       Policies:
-        - PolicyName: ProofGateReelsAndRecordings
+        - PolicyName: AxcasPollyVoiceover
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
                 Action: [polly:SynthesizeSpeech]
                 Resource: '*'
+        - PolicyName: AxcasConsentedCallRecordings
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
               - Effect: Allow
                 Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
                 Resource: !Sub '${RecordingsBucket.Arn}/*'
+        - PolicyName: AxcasPrivateMerchantMedia
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:AbortMultipartUpload]
+                Resource:
+                  - !Sub '${MerchantMediaBucket.Arn}/private/*'
+                  - !Sub '${MerchantMediaBucket.Arn}/published/*'
+              - Effect: Allow
+                Action: [s3:ListBucket]
+                Resource: !GetAtt MerchantMediaBucket.Arn
+                Condition:
+                  StringLike:
+                    's3:prefix': ['private/*', 'published/*']
+              - Effect: Allow
+                Action: [s3:ListBucketMultipartUploads]
+                Resource: !GetAtt MerchantMediaBucket.Arn
+        - PolicyName: AxcasRuntimeControl
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
               - Effect: Allow
                 Action: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility, sqs:GetQueueAttributes]
                 Resource: !GetAtt HermesRelayQueue.Arn
@@ -266,9 +441,53 @@ Resources:
           fi
           systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service
           printf 'Hermes Agent v0.18.2 (v2026.7.7.2) pinned at 9de9c25f620ff7f1ce0fd5457d596052d5159596\n' >/opt/proofgate/HERMES_PIN
+  HermesSystemStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The Axcas host failed its AWS system check; EC2 recovery is automatic.
+      AlarmName: !Sub '${AWS::StackName}-host-system-status'
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref OperationsAlertTopic
+        - !Sub 'arn:${AWS::Partition}:automate:${AWS::Region}:ec2:recover'
+      OKActions: [!Ref OperationsAlertTopic]
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_System
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref HermesHost
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
+  HermesInstanceStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The Axcas guest operating system failed its EC2 instance check.
+      AlarmName: !Sub '${AWS::StackName}-host-instance-status'
+      ActionsEnabled: true
+      AlarmActions: [!Ref OperationsAlertTopic]
+      OKActions: [!Ref OperationsAlertTopic]
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_Instance
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref HermesHost
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: missing
 Outputs:
   InstanceId: { Value: !Ref HermesHost }
   RecordingsBucketName: { Value: !Ref RecordingsBucket }
+  MerchantMediaBucketName: { Value: !Ref MerchantMediaBucket }
+  OperationsAlertTopicArn: { Value: !Ref OperationsAlertTopic }
   RelayOriginUrl: { Value: !Sub 'https://${HermesRelayApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}' }
   RelayQueueUrl: { Value: !Ref HermesRelayQueue }
   RelaySecretArn: { Value: !Ref HermesRelayProxySecret }

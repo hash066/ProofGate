@@ -1,11 +1,17 @@
 # AWS foundation
 
-Current account gate on 2026-08-08: the `ap-south-1` console redirects to
-`/billing/signup/incomplete` and requires payment method, identity verification, and
-support-plan setup. No template validation, stack, instance, role, volume, or bucket is
-claimed until account activation completes.
+`cloudformation.yaml` creates the approved `t3.small` Ubuntu host with an encrypted
+gp3 root volume, an outbound-only security group, Polly and Systems Manager access,
+and no SSH ingress. Consented call recordings and merchant media use different private,
+encrypted, versioned S3 buckets and different IAM policy statements. Recordings expire
+after 30 days. Unselected uploads expire after 30 days, generated private renders after
+90 days, and explicitly published immutable media has no automatic expiration.
 
-`cloudformation.yaml` creates the approved `t3.small` Ubuntu host with an encrypted gp3 root volume, an outbound-only security group, an instance role for Polly and outbound-only Systems Manager access, and a private encrypted S3 bucket whose recording objects expire after 30 days. It does not open SSH.
+The stack also creates an operator SNS topic and CloudWatch alarms for relay Lambda
+errors, delayed relay messages, dead-letter messages, EC2 instance failures, and EC2
+system failures. A two-minute system failure triggers EC2 action-based recovery on new
+hardware while retaining the instance identity and EBS state. This does not replace
+application-level health monitoring or a multi-instance failover design.
 
 ## Preflight
 
@@ -16,19 +22,27 @@ aws sts get-caller-identity --region ap-south-1
 aws cloudformation validate-template --template-body file://infra/aws/cloudformation.yaml --region ap-south-1
 ```
 
-Static review on 2026-08-06 confirmed the required resource properties in source. That is not an AWS validation or deployment receipt: this machine had no AWS CLI, profile, environment credentials, or boto3 credential source.
+Static source tests are not an AWS validation or deployment receipt. Run the authenticated
+validation above before changing the live stack.
 
 Deploy only after the account owner accepts AWS terms and selects the account/region:
 
 ```powershell
-npm run aws:deploy -- -RepositoryCommit FULL_PUSHED_40_CHARACTER_SHA
+npm run aws:deploy -- -RepositoryCommit FULL_PUSHED_40_CHARACTER_SHA -OperatorAlertEmail operator@example.com
 ```
 
 That command fails closed unless AWS identity and CloudFormation validation succeed. It
 creates the stack, waits for the instance to register with Systems Manager, checks out
 the exact pushed ProofGate commit, runs `npm ci`, installs the repository Hermes skill,
-and enables (without prematurely starting) the authenticated origin and named-tunnel
-services. It does not accept or store any customer credential.
+and enables the isolated gateway, typed bridge, guardians, relay, authenticated origin,
+and named-tunnel services. It does not accept or store any customer credential. AWS sends
+a confirmation email for the SNS subscription; alerts will not reach that address until
+the operator confirms it.
+
+After deployment, record the returned `MerchantMediaBucket`, `RecordingsBucket`, and
+`OperationsAlertTopicArn`. Verify all five alarms have actions enabled and remain `OK`,
+send one controlled SNS test notification, and confirm its delivery. Do not manufacture a
+DLQ event in production merely to test alerting.
 
 The host pins the signed Hermes `v2026.7.7.2` release (`v0.18.2`) at commit `9de9c25f620ff7f1ce0fd5457d596052d5159596`. Do not use the old `fb402106` pin: inspection shows that commit contains `v0.20.0`.
 

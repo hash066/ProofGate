@@ -126,6 +126,17 @@ export default defineSchema({
     .index("by_session_hash", ["sessionHash"])
     .index("by_merchant", ["merchantId"]),
 
+  studioDataRequests: defineTable({
+    requestId: v.string(),
+    merchantId: v.string(),
+    type: v.union(v.literal("export"), v.literal("deletion")),
+    status: v.literal("requested"),
+    dueBy: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_request_id", ["requestId"])
+    .index("by_merchant_type", ["merchantId", "type"]),
+
   studioProjects: defineTable({
     projectId: v.string(),
     revisionId: v.string(),
@@ -390,4 +401,57 @@ export default defineSchema({
   })
     .index("by_campaign_id", ["campaignId"])
     .index("by_merchant", ["merchantId"]),
+
+  tenantPlanAssignments: defineTable({
+    assignmentId: v.string(),
+    merchantId: v.string(),
+    planCode: v.string(),
+    modelTurnsLimit: v.number(),
+    whatsappMessagesLimit: v.number(),
+    storageBytesLimit: v.number(),
+    renderSecondsLimit: v.number(),
+    pollyCharactersLimit: v.number(),
+    callCostMicrousdLimit: v.number(),
+    effectiveAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_assignment_id", ["assignmentId"])
+    .index("by_merchant_effective", ["merchantId", "effectiveAt"]),
+
+  usageEntries: defineTable({
+    usageEntryId: v.string(),
+    idempotencyKey: v.string(),
+    operationId: v.string(),
+    merchantId: v.string(),
+    metric: v.union(
+      v.literal("model_turns"), v.literal("whatsapp_messages"), v.literal("storage_bytes"),
+      v.literal("render_seconds"), v.literal("polly_characters"), v.literal("call_cost_microusd"),
+    ),
+    quantity: v.number(),
+    basis: v.union(v.literal("reserved"), v.literal("actual")),
+    periodStart: v.number(),
+    evidenceRef: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_usage_entry_id", ["usageEntryId"])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_merchant_metric_period", ["merchantId", "metric", "periodStart"])
+    .index("by_merchant_operation", ["merchantId", "operationId"]),
+
+  usageQuotaChecks: defineTable({
+    checkId: v.string(),
+    idempotencyKey: v.string(),
+    merchantId: v.string(),
+    operationId: v.string(),
+    requestsJson: v.string(),
+    allowed: v.boolean(),
+    blockingMetric: v.optional(v.union(
+      v.literal("model_turns"), v.literal("whatsapp_messages"), v.literal("storage_bytes"),
+      v.literal("render_seconds"), v.literal("polly_characters"), v.literal("call_cost_microusd"),
+    )),
+    createdAt: v.number(),
+  })
+    .index("by_check_id", ["checkId"])
+    .index("by_idempotency_key", ["idempotencyKey"])
+    .index("by_merchant_created", ["merchantId", "createdAt"]),
 });

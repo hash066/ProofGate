@@ -6,6 +6,7 @@ import { initialSpikeSiteSpec, SiteSpecSchema } from "../../../packages/domain/s
 import { BusinessBriefInputSchema, BusinessBriefSchema, LeadConsentSchema, ReelPlanSchema, SiteSpecV2Schema, type BusinessBriefV1, type LeadConsentV1, type ReelPlanV1, type SiteSpecV2 } from "../../../packages/domain/src/growth";
 import { StudioIntakeInputSchema, StudioIntentSchema, StudioProjectInputSchema, formatApprovalChecklist, type StudioIntent, type StudioProjectInput } from "../../../packages/domain/src/studio";
 import { CustomerOutboxMessageSchema, WorkflowProgressSchema, WorkflowStatusSchema, decodeProjectCursor, encodeProjectCursor, nextProjectCursor, type ProjectSyncCursor } from "../../../packages/domain/src/workflow";
+import { quotaExceededCustomerMessage, type UsageMetric, type UsageReservationBatch } from "../../../packages/domain/src/usage";
 import { buildStudioReelPlan, buildStudioWebsite, MissingStudioFactsError, studioProjectFromBusinessBrief } from "../../../packages/domain/src/studio-builder";
 import { deriveTenantIdentity, tenantScopedAssetId } from "../../../packages/domain/src/tenant";
 import { DecisionPolicySchema, DecisionRequestSchema, evaluateDecision, type DecisionPolicyV1 } from "../../../packages/domain/src/decision-policy";
@@ -112,12 +113,17 @@ export type GrowthAdminBoundary = {
   completeStudioLink: (input: { linkId: string; browserNonceHash: string; sessionHash: string; sessionExpiresAt: number }, bindings?: Bindings) => Promise<{ status: "pending" | "expired" | "authenticated"; merchantId?: string; ownerWaIdHash?: string; intent?: StudioIntent }>;
   getStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ merchantId: string; ownerWaIdHash: string; expiresAt: number } | null>;
   revokeStudioSession: (sessionHash: string, bindings?: Bindings) => Promise<{ revoked: boolean }>;
+  listStudioSessions: (merchantId: string, currentSessionHash: string, bindings?: Bindings) => Promise<Array<{ deviceId: string; createdAt: number; expiresAt: number; current: boolean }>>;
+  revokeStudioDevice: (input: { merchantId: string; deviceId: string }, bindings?: Bindings) => Promise<{ revoked: boolean }>;
+  createStudioDataRequest: (input: { requestId: string; merchantId: string; type: "export" | "deletion"; dueBy: number }, bindings?: Bindings) => Promise<{ requestId: string; status: "requested"; dueBy: number; created: boolean }>;
   saveStudioProject: (input: { projectId: string; revisionId: string; parentRevisionId?: string; merchantId: string; intent: StudioIntent; source: "whatsapp" | "studio"; project: StudioProjectInput }, bindings?: Bindings) => Promise<{ inserted: boolean; conflict: boolean; headRevisionId?: string }>;
   listStudioProjects: (merchantId: string, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; source: "whatsapp" | "studio"; project: StudioProjectInput; createdAt: number }>>;
   listStudioProjectChanges: (merchantId: string, cursor: ProjectSyncCursor | undefined, limit: number, bindings?: Bindings) => Promise<Array<{ projectId: string; revisionId: string; parentRevisionId?: string; intent: StudioIntent; source: "whatsapp" | "studio"; project: StudioProjectInput; createdAt: number }>>;
   beginInboundWorkflow: (input: { workflowId: string; merchantId: string; ownerWaIdHash: string; channel: "whatsapp_cloud"; providerMessageId: string }, bindings?: Bindings) => Promise<{ created: boolean; workflowId: string; status: string }>;
   recordWorkflowProgress: (input: { workflowId: string; eventId: string; status: string; progress: string; projectId?: string; intent?: StudioIntent }, bindings?: Bindings) => Promise<{ inserted: boolean; status: string }>;
   enqueueCustomerOutbox: (input: { outboxId: string; workflowId: string; merchantId: string; kind: "progress" | "missing_facts" | "approval" | "completion" | "retry"; body: string; dedupeKey: string }, bindings?: Bindings) => Promise<{ inserted: boolean; outboxId: string }>;
+  reserveUsage: (input: UsageReservationBatch, bindings?: Bindings) => Promise<{ allowed: boolean; blockingMetric?: UsageMetric }>;
+  recordActualUsage: (input: { usageEntryId: string; idempotencyKey: string; operationId: string; merchantId: string; metric: UsageMetric; quantity: number; evidenceRef: string; occurredAt: number }, bindings?: Bindings) => Promise<{ inserted: boolean }>;
 };
 
 function canonicalize(value: unknown): string {
@@ -435,6 +441,15 @@ const liveAdminBoundary: GrowthAdminBoundary = {
   revokeStudioSession: (sessionHash, bindings) => adminClient(bindings).action((api as any).growth.adminRevokeStudioSession, {
     serviceSecret: serviceSecret(bindings), sessionHash, now: Date.now(),
   }),
+  listStudioSessions: (merchantId, currentSessionHash, bindings) => adminClient(bindings).query((api as any).growth.adminListStudioSessions, {
+    serviceSecret: serviceSecret(bindings), merchantId, currentSessionHash, now: Date.now(),
+  }),
+  revokeStudioDevice: (input, bindings) => adminClient(bindings).action((api as any).growth.adminRevokeStudioDevice, {
+    serviceSecret: serviceSecret(bindings), ...input, now: Date.now(),
+  }),
+  createStudioDataRequest: (input, bindings) => adminClient(bindings).action((api as any).growth.adminCreateStudioDataRequest, {
+    serviceSecret: serviceSecret(bindings), ...input, createdAt: Date.now(),
+  }),
   saveStudioProject: (input, bindings) => adminClient(bindings).action((api as any).growth.adminSaveStudioProject, {
     serviceSecret: serviceSecret(bindings), projectId: input.projectId, revisionId: input.revisionId,
     parentRevisionId: input.parentRevisionId, merchantId: input.merchantId, intent: input.intent, source: input.source,
@@ -466,6 +481,12 @@ const liveAdminBoundary: GrowthAdminBoundary = {
       merchantId: message.merchantId, kind: message.kind, body: message.body, dedupeKey: message.dedupeKey, createdAt: message.createdAt,
     });
   },
+  reserveUsage: (input, bindings) => adminClient(bindings).action((api as any).growth.adminReserveUsage, {
+    serviceSecret: serviceSecret(bindings), ...input,
+  }),
+  recordActualUsage: (input, bindings) => adminClient(bindings).action((api as any).growth.adminRecordActualUsage, {
+    serviceSecret: serviceSecret(bindings), ...input,
+  }),
 };
 
 function adminAuthorized(authorization: string | undefined, bindings?: Bindings): boolean {
@@ -562,6 +583,13 @@ async function decryptSensitive(value: string, encodedKey: string | undefined): 
 
 export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBoundary, growthBoundary: GrowthBoundary = liveGrowthBoundary, adminBoundary: GrowthAdminBoundary = liveAdminBoundary, studioVerifierBoundary: StudioVerifierBoundary = liveStudioVerifierBoundary): Hono<{ Bindings: Bindings }> {
   const app = new Hono<{ Bindings: Bindings }>();
+  const reserveOutboundMessage = (merchantId: string, operationId: string, bindings?: Bindings) => adminBoundary.reserveUsage({
+    merchantId, operationId, idempotencyKey: `reserve:${operationId}`, requestedAt: Date.now(), reservations: [{ metric: "whatsapp_messages", quantity: 1 }],
+  }, bindings);
+  const recordOutboundMessage = (merchantId: string, operationId: string, providerMessageId: string, bindings?: Bindings) => adminBoundary.recordActualUsage({
+    usageEntryId: `actual:${operationId}`, idempotencyKey: `actual:${operationId}`, operationId, merchantId,
+    metric: "whatsapp_messages", quantity: 1, evidenceRef: `meta:${providerMessageId}`, occurredAt: Date.now(),
+  }, bindings);
   app.get("/", (context) => context.html(renderProductHome(), 200, {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
@@ -633,6 +661,61 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       "cache-control": "no-store",
       "set-cookie": "axcas_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax",
     });
+  });
+  app.get("/api/studio/sessions", async (context) => {
+    const raw = cookieValue(context.req.header("cookie"), "axcas_session");
+    if (!raw || !/^[A-Za-z0-9_-]{30,100}$/.test(raw)) return context.text("Unauthorized", 401);
+    const currentSessionHash = await sha256(raw);
+    const session = await adminBoundary.getStudioSession(currentSessionHash, context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const sessions = await adminBoundary.listStudioSessions(session.merchantId, currentSessionHash, context.env);
+    return context.json({ sessions }, 200, { "cache-control": "no-store" });
+  });
+  app.delete("/api/studio/sessions/:deviceId", async (context) => {
+    const raw = cookieValue(context.req.header("cookie"), "axcas_session");
+    if (!raw || !/^[A-Za-z0-9_-]{30,100}$/.test(raw)) return context.text("Unauthorized", 401);
+    const currentSessionHash = await sha256(raw);
+    const session = await adminBoundary.getStudioSession(currentSessionHash, context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const deviceId = context.req.param("deviceId");
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(deviceId)) return context.text("Invalid browser", 400);
+    const result = await adminBoundary.revokeStudioDevice({ merchantId: session.merchantId, deviceId }, context.env);
+    if (!result.revoked) return context.text("Browser not found", 404);
+    const current = currentSessionHash.startsWith(deviceId);
+    return context.json({ revoked: true, current }, 200, {
+      "cache-control": "no-store",
+      ...(current ? { "set-cookie": "axcas_session=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax" } : {}),
+    });
+  });
+  app.post("/api/studio/account/export", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    const requestId = `data-request-${crypto.randomUUID()}`;
+    const exportedAt = Date.now();
+    await adminBoundary.createStudioDataRequest({ requestId, merchantId: session.merchantId, type: "export", dueBy: exportedAt }, context.env);
+    const projects = await adminBoundary.listStudioProjects(session.merchantId, context.env);
+    return context.json({
+      schemaVersion: 1,
+      exportedAt,
+      account: { method: "whatsapp", verified: true },
+      projects,
+    }, 200, {
+      "cache-control": "private, no-store",
+      "content-disposition": 'attachment; filename="axcas-account-export.json"',
+      "x-content-type-options": "nosniff",
+    });
+  });
+  app.post("/api/studio/account/deletion", async (context) => {
+    const session = await studioSession(context.req.header("cookie"), context.env);
+    if (!session) return context.text("Unauthorized", 401);
+    let confirmation: unknown;
+    try { confirmation = (await context.req.json() as { confirmation?: unknown }).confirmation; }
+    catch { return context.text("Confirm the deletion request", 400); }
+    if (confirmation !== "DELETE MY DATA") return context.text("Confirm the deletion request", 400);
+    const requestId = `data-request-${crypto.randomUUID()}`;
+    const dueBy = Date.now() + 30 * 86_400_000;
+    const result = await adminBoundary.createStudioDataRequest({ requestId, merchantId: session.merchantId, type: "deletion", dueBy }, context.env);
+    return context.json({ status: result.status, requestId: result.requestId, dueBy: result.dueBy ?? dueBy }, 202, { "cache-control": "no-store" });
   });
   app.get("/api/studio/projects", async (context) => {
     const session = await studioSession(context.req.header("cookie"), context.env);
@@ -736,6 +819,14 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       return context.text("Reel project is incomplete", 409);
     }
     const planHash = await sha256(canonicalize(built.plan));
+    const usage = await adminBoundary.reserveUsage({
+      merchantId: session.merchantId, operationId: `reel:${built.plan.reelId}`, idempotencyKey: `reserve:reel:${planHash}`,
+      requestedAt: Date.now(), reservations: [
+        { metric: "render_seconds", quantity: Math.ceil(built.plan.scenes.reduce((total, scene) => total + scene.durationMs, 0) / 1000) },
+        { metric: "polly_characters", quantity: built.plan.voiceover.length },
+      ],
+    }, context.env);
+    if (!usage.allowed) return context.json({ stage: "usage_limit", message: quotaExceededCustomerMessage(usage.blockingMetric ?? "render_seconds") }, 429, { "cache-control": "no-store" });
     const approvalId = `approval-${crypto.randomUUID()}`;
     await adminBoundary.registerReel(built.plan, planHash, approvalId, context.env);
     await adminBoundary.createApproval({ approvalId, merchantId: session.merchantId, type: "reel", scopeHash: planHash, expiresAt: Date.now() + 86_400_000 }, context.env);
@@ -799,10 +890,15 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (body.byteLength === 0 || body.byteLength > MAX_ASSET_BYTES) return context.text("Asset size is invalid", 413);
     if (!hasValidAssetSignature(contentType, body)) return context.text("Asset content does not match its declared type", 415);
     const assetId = tenantScopedAssetId(session, localAssetId);
+    const digest = await sha256Bytes(body);
+    const operationId = `asset:${assetId}:${digest}`;
+    const usage = await adminBoundary.reserveUsage({ merchantId: session.merchantId, operationId, idempotencyKey: `reserve:${operationId}`, requestedAt: Date.now(), reservations: [{ metric: "storage_bytes", quantity: body.byteLength }] }, context.env);
+    if (!usage.allowed) return context.json({ stage: "usage_limit", message: quotaExceededCustomerMessage("storage_bytes") }, 429, { "cache-control": "no-store" });
     const result = await adminBoundary.uploadAsset({
-      assetId, merchantId: session.merchantId, sha256: await sha256Bytes(body), contentType, byteLength: body.byteLength,
+      assetId, merchantId: session.merchantId, sha256: digest, contentType, byteLength: body.byteLength,
       sourceProviderMessageId: `studio:${projectId}:${crypto.randomUUID()}`, body,
     }, context.env);
+    await adminBoundary.recordActualUsage({ usageEntryId: `actual:${operationId}`, idempotencyKey: `actual:${operationId}`, operationId, merchantId: session.merchantId, metric: "storage_bytes", quantity: body.byteLength, evidenceRef: `sha256:${digest}`, occurredAt: Date.now() }, context.env);
     return context.json({ accepted: true, assetId, storageBackend: result.storageBackend }, 201);
   });
   const legalHeaders = {
@@ -929,11 +1025,15 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       }, context.env);
       if (!result.linked) return context.json({ linked: false }, 409);
       if (context.env?.META_PHONE_NUMBER_ID && context.env.META_ACCESS_TOKEN) {
-        await sendTextMessage({
+        const operationId = `wa-out:studio-link:${studioLink.providerMessageId}`;
+        const messageUsage = await reserveOutboundMessage(tenant.merchantId, operationId, context.env);
+        if (!messageUsage.allowed) return context.json({ linked: true, delivery: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 200);
+        const receipt = await sendTextMessage({
           graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
           accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: studioLink.senderWaId,
           body: `✅ Browser linked. Your WhatsApp and Studio now share one workspace: ${new URL(context.req.url).origin}/studio`,
         });
+        await recordOutboundMessage(tenant.merchantId, operationId, receipt.providerMessageId, context.env);
       }
       return context.json({ linked: true }, 200);
     }
@@ -950,6 +1050,30 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     }));
     const created = workflows.filter((workflow) => workflow.created);
     if (!created.length) return context.json({ accepted: true, duplicate: true, workflowIds: workflows.map((workflow) => workflow.workflowId) }, 200);
+    const createdById = new Set(created.map(({ workflowId }) => workflowId));
+    const newMessages = (await Promise.all(inbound.map(async (message) => {
+      const workflowId = await workflowIdForProviderMessage(message.providerMessageId);
+      if (!createdById.has(workflowId)) return null;
+      const tenant = await deriveTenantIdentity(message.senderWaId);
+      await adminBoundary.recordActualUsage({
+        usageEntryId: `actual:wa-in:${message.providerMessageId}`, idempotencyKey: `actual:wa-in:${message.providerMessageId}`,
+        operationId: `wa-in:${message.providerMessageId}`, merchantId: tenant.merchantId, metric: "whatsapp_messages", quantity: 1,
+        evidenceRef: `meta:${message.providerMessageId}`, occurredAt: Date.now(),
+      }, context.env);
+      const usage = await adminBoundary.reserveUsage({
+        merchantId: tenant.merchantId, operationId: `model-turn:${message.providerMessageId}`,
+        idempotencyKey: `reserve:model-turn:${message.providerMessageId}`, requestedAt: Date.now(), reservations: [{ metric: "model_turns", quantity: 1 }],
+      }, context.env);
+      return { workflowId, tenant, usage };
+    }))).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    const blocked = newMessages.filter(({ usage }) => !usage.allowed);
+    if (blocked.length) {
+      await Promise.all(blocked.flatMap(({ workflowId, tenant, usage }) => [
+        adminBoundary.recordWorkflowProgress({ workflowId, eventId: `${workflowId}:usage-limit`, status: "retrying", progress: "temporary_retry" }, context.env),
+        adminBoundary.enqueueCustomerOutbox({ outboxId: `${workflowId}:usage-limit`, workflowId, merchantId: tenant.merchantId, kind: "retry", body: quotaExceededCustomerMessage(usage.blockingMetric ?? "model_turns"), dedupeKey: `${workflowId}:usage-limit` }, context.env),
+      ]));
+      return context.json({ accepted: true, stage: "usage_limit", message: quotaExceededCustomerMessage(blocked[0]!.usage.blockingMetric ?? "model_turns") }, 200);
+    }
     const forwarded = await growthBoundary.forwardToHermes(rawBody, context.req.raw.headers, context.env);
     const status = WorkflowStatusSchema.parse(forwarded.ok ? "processing" : "retrying");
     const progress = WorkflowProgressSchema.parse(forwarded.ok ? "message_received" : "temporary_retry");
@@ -1075,9 +1199,12 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     await adminBoundary.createApproval({ approvalId, merchantId: payload.merchantId, type: "release", scopeHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     const recipientWaId = context.req.header("x-hermes-user-id")?.replace(/\D/g, "");
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env.META_ACCESS_TOKEN) return context.json({ accepted: true, requestId, approvalId, scopeHash, delivery: "blocked_missing_meta_configuration" }, 202);
+    const releaseMessageOperation = `wa-out:approval:${approvalId}`;
+    if (!(await reserveOutboundMessage(payload.merchantId, releaseMessageOperation, context.env)).allowed) return context.json({ accepted: true, requestId, approvalId, scopeHash, delivery: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 202);
     const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: formatApprovalChecklist({
       type: "release", subject: `${payload.siteId} website`, details: ["Private preview reviewed", "Mobile layout and WhatsApp buttons verified", "Only supplied claims and selected media"],
     }) });
+    await recordOutboundMessage(payload.merchantId, releaseMessageOperation, receipt.providerMessageId, context.env);
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, requestId, approvalId, scopeHash, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -1100,15 +1227,23 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     const tenant = await tenantFromHermesHeader(context.req.header("x-hermes-user-id"));
     if (!tenant) return context.text("Authenticated WhatsApp sender is required", 400);
     if (batch.merchantId !== tenant.merchantId) return context.text("Hermes tenant identity mismatch", 403);
+    const callUsage = await adminBoundary.reserveUsage({
+      merchantId: batch.merchantId, operationId: `call-batch:${batch.batchId}`, idempotencyKey: `reserve:call-batch:${batch.scopeHash}`,
+      requestedAt: Date.now(), reservations: [{ metric: "call_cost_microusd", quantity: Math.ceil(batch.costCapUsd * 1_000_000) }],
+    }, context.env);
+    if (!callUsage.allowed) return context.json({ accepted: false, stage: "usage_limit", message: quotaExceededCustomerMessage("call_cost_microusd") }, 429);
     const approvalId = `approval-${crypto.randomUUID()}`;
     await adminBoundary.createCallBatch(batch, approvalId, context.env);
     await adminBoundary.createApproval({ approvalId, merchantId: batch.merchantId, type: "call_batch", scopeHash: batch.scopeHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     const recipientWaId = context.req.header("x-hermes-user-id")?.replace(/\D/g, "");
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env?.META_ACCESS_TOKEN) return context.json({ accepted: true, approvalId, delivery: "blocked_missing_meta_configuration" }, 202);
+    const callMessageOperation = `wa-out:approval:${approvalId}`;
+    if (!(await reserveOutboundMessage(batch.merchantId, callMessageOperation, context.env)).allowed) return context.json({ accepted: true, approvalId, delivery: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 202);
     const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: formatApprovalChecklist({
       type: "call_batch", subject: `${batch.leadIds.length} qualification call${batch.leadIds.length === 1 ? "" : "s"}`,
       details: ["Merchant-supplied consent checked", "India/US policy checked", `One attempt per lead · cap $${batch.costCapUsd.toFixed(2)}`, "Recording starts only after spoken consent"],
     }) });
+    await recordOutboundMessage(batch.merchantId, callMessageOperation, receipt.providerMessageId, context.env);
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, approvalId, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -1119,14 +1254,25 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!tenant) return context.text("Authenticated WhatsApp sender is required", 400);
     if (plan.merchantId !== tenant.merchantId) return context.text("Hermes tenant identity mismatch", 403);
     const planHash = await sha256(canonicalize(plan));
+    const reelUsage = await adminBoundary.reserveUsage({
+      merchantId: plan.merchantId, operationId: `reel:${plan.reelId}`, idempotencyKey: `reserve:reel:${planHash}`,
+      requestedAt: Date.now(), reservations: [
+        { metric: "render_seconds", quantity: Math.ceil(plan.scenes.reduce((total, scene) => total + scene.durationMs, 0) / 1000) },
+        { metric: "polly_characters", quantity: plan.voiceover.length },
+      ],
+    }, context.env);
+    if (!reelUsage.allowed) return context.json({ accepted: false, stage: "usage_limit", message: quotaExceededCustomerMessage(reelUsage.blockingMetric ?? "render_seconds") }, 429);
     const approvalId = `approval-${crypto.randomUUID()}`;
     await adminBoundary.registerReel(plan, planHash, approvalId, context.env);
     await adminBoundary.createApproval({ approvalId, merchantId: plan.merchantId, type: "reel", scopeHash: planHash, expiresAt: Date.now() + 86_400_000 }, context.env);
     const recipientWaId = context.req.header("x-hermes-user-id")?.replace(/\D/g, "");
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env?.META_ACCESS_TOKEN) return context.json({ accepted: true, approvalId, planHash, delivery: "blocked_missing_meta_configuration" }, 202);
+    const reelMessageOperation = `wa-out:approval:${approvalId}`;
+    if (!(await reserveOutboundMessage(plan.merchantId, reelMessageOperation, context.env)).allowed) return context.json({ accepted: true, approvalId, planHash, delivery: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 202);
     const receipt = await sendApprovalButtons({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId, body: formatApprovalChecklist({
       type: "reel", subject: plan.angle, details: ["Uses selected merchant media", "Claims checked against supplied facts", "9:16 render and safe overlays", "Returned privately; not auto-posted"],
     }) });
+    await recordOutboundMessage(plan.merchantId, reelMessageOperation, receipt.providerMessageId, context.env);
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, approvalId, planHash, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -1149,11 +1295,14 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!recipientWaId || !context.env?.META_PHONE_NUMBER_ID || !context.env.META_ACCESS_TOKEN) {
       return context.json({ accepted: true, approvalId, scopeHash: campaign.scopeHash, delivery: "blocked_missing_meta_configuration" }, 202);
     }
+    const campaignMessageOperation = `wa-out:approval:${approvalId}`;
+    if (!(await reserveOutboundMessage(campaign.merchantId, campaignMessageOperation, context.env)).allowed) return context.json({ accepted: true, approvalId, scopeHash: campaign.scopeHash, delivery: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 202);
     const receipt = await sendApprovalButtons({
       graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
       accessToken: context.env.META_ACCESS_TOKEN, recipientWaId, approvalId,
       body: formatApprovalChecklist({ type: "social_campaign", subject: "Instagram three-variation experiment", details: ["Exactly three approved reels", "Captions and schedules locked", "2h, 24h and 72h checks", "No fourth post or silent edits"] }),
     });
+    await recordOutboundMessage(campaign.merchantId, campaignMessageOperation, receipt.providerMessageId, context.env);
     await adminBoundary.attachApprovalMessage(approvalId, receipt.providerMessageId, context.env);
     return context.json({ accepted: true, approvalId, scopeHash: campaign.scopeHash, providerMessageId: receipt.providerMessageId }, 201);
   });
@@ -1173,13 +1322,18 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (body.byteLength === 0 || body.byteLength > MAX_ASSET_BYTES) return context.text("Asset size is invalid", 413);
     if (!hasValidAssetSignature(contentType, body)) return context.text("Asset content does not match its declared type", 415);
     const digest = await sha256Bytes(body);
+    const operationId = `asset:${assetId}:${digest}`;
+    const assetUsage = await adminBoundary.reserveUsage({ merchantId, operationId, idempotencyKey: `reserve:${operationId}`, requestedAt: Date.now(), reservations: [{ metric: "storage_bytes", quantity: body.byteLength }] }, context.env);
+    if (!assetUsage.allowed) return context.json({ accepted: false, stage: "usage_limit", message: quotaExceededCustomerMessage("storage_bytes") }, 429);
     if (!context.env?.PROOFGATE_ASSETS) {
       const result = await adminBoundary.uploadAsset({ assetId, merchantId, sha256: digest, contentType, byteLength: body.byteLength, sourceProviderMessageId, body }, context.env);
+      await adminBoundary.recordActualUsage({ usageEntryId: `actual:${operationId}`, idempotencyKey: `actual:${operationId}`, operationId, merchantId, metric: "storage_bytes", quantity: body.byteLength, evidenceRef: `sha256:${digest}`, occurredAt: Date.now() }, context.env);
       return context.json({ accepted: true, localAssetId, assetId, sha256: digest, storageBackend: "convex", result }, 201);
     }
     const objectKey = `assets/${tenant.merchantId}/${assetId}/${digest}`;
     await context.env.PROOFGATE_ASSETS.put(objectKey, body, { httpMetadata: { contentType }, customMetadata: { sha256: digest, merchantId } });
     const result = await adminBoundary.registerAsset({ assetId, merchantId, storageBackend: "r2", objectKey, sha256: digest, contentType, byteLength: body.byteLength, sourceProviderMessageId }, context.env);
+    await adminBoundary.recordActualUsage({ usageEntryId: `actual:${operationId}`, idempotencyKey: `actual:${operationId}`, operationId, merchantId, metric: "storage_bytes", quantity: body.byteLength, evidenceRef: `sha256:${digest}`, occurredAt: Date.now() }, context.env);
     return context.json({ accepted: true, localAssetId, assetId, sha256: digest, storageBackend: "r2", result }, 201);
   });
   app.get("/internal/render-assets/:assetId", async (context) => {
@@ -1201,7 +1355,12 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (body.byteLength === 0 || body.byteLength > MAX_ASSET_BYTES) return context.text("Asset size is invalid", 413);
     if (!hasValidAssetSignature("video/mp4", body)) return context.text("Rendered asset must be an MP4", 415);
     const assetId = `rendered-${merchantId.slice(-12)}-${localAssetId}`;
-    const result = await adminBoundary.uploadAsset({ assetId, merchantId, sha256: await sha256Bytes(body), contentType: "video/mp4", byteLength: body.byteLength, sourceProviderMessageId, body }, context.env);
+    const digest = await sha256Bytes(body);
+    const operationId = `asset:${assetId}:${digest}`;
+    const assetUsage = await adminBoundary.reserveUsage({ merchantId, operationId, idempotencyKey: `reserve:${operationId}`, requestedAt: Date.now(), reservations: [{ metric: "storage_bytes", quantity: body.byteLength }] }, context.env);
+    if (!assetUsage.allowed) return context.json({ accepted: false, stage: "usage_limit", message: quotaExceededCustomerMessage("storage_bytes") }, 429);
+    const result = await adminBoundary.uploadAsset({ assetId, merchantId, sha256: digest, contentType: "video/mp4", byteLength: body.byteLength, sourceProviderMessageId, body }, context.env);
+    await adminBoundary.recordActualUsage({ usageEntryId: `actual:${operationId}`, idempotencyKey: `actual:${operationId}`, operationId, merchantId, metric: "storage_bytes", quantity: body.byteLength, evidenceRef: `sha256:${digest}`, occurredAt: Date.now() }, context.env);
     return context.json({ accepted: true, assetId, storageBackend: result.storageBackend }, 201);
   });
   app.post("/internal/guardian", async (context) => {
@@ -1246,6 +1405,9 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
     if (!payload.reelId || !/^[a-zA-Z0-9_-]{3,128}$/.test(payload.reelId) || !payload.renderedAssetId || !/^[a-zA-Z0-9_-]{3,128}$/.test(payload.renderedAssetId)) return context.text("Invalid reel delivery scope", 400);
     if (!payload.recipientWaId || !/^\d{8,15}$/.test(payload.recipientWaId) || (payload.caption?.length ?? 0) > 1024) return context.text("Invalid reel recipient or caption", 400);
     if (!context.env?.META_PHONE_NUMBER_ID || !context.env.META_ACCESS_TOKEN) return context.text("Meta is not configured", 503);
+    const recipientTenant = await deriveTenantIdentity(payload.recipientWaId);
+    const deliveryOperation = `wa-out:reel:${payload.reelId}`;
+    if (!(await reserveOutboundMessage(recipientTenant.merchantId, deliveryOperation, context.env)).allowed) return context.json({ delivered: false, stage: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 429);
     const object = await adminBoundary.getPrivateAsset(payload.renderedAssetId, context.env);
     if (!object) return context.text("Rendered reel asset not found", 404);
     const contentType = object.contentType;
@@ -1258,15 +1420,21 @@ export function createApp(evidenceBoundary: EvidenceBoundary = liveEvidenceBound
       graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID,
       accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: payload.recipientWaId, mediaId: media.mediaId, caption: payload.caption,
     });
+    await recordOutboundMessage(recipientTenant.merchantId, deliveryOperation, receipt.providerMessageId, context.env);
     await adminBoundary.completeReel(payload.reelId, "rendered", payload.renderedAssetId, receipt.providerMessageId, context.env);
     return context.json({ delivered: true, reelId: payload.reelId, renderedAssetId: payload.renderedAssetId, providerMessageId: receipt.providerMessageId }, 201);
   });
   app.post("/internal/action-required", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);
-    const payload = await context.req.json() as { recipientWaId?: string };
-    if (!payload.recipientWaId || !/^\d{8,15}$/.test(payload.recipientWaId)) return context.text("Invalid recipient", 400);
+    const payload = await context.req.json() as { recipientWaId?: string; requestId?: string };
+    if (!payload.recipientWaId || !/^\d{8,15}$/.test(payload.recipientWaId) || !payload.requestId || !/^[a-zA-Z0-9_.:-]{3,128}$/.test(payload.requestId)) return context.text("Invalid recipient or request ID", 400);
     if (!context.env?.META_PHONE_NUMBER_ID || !context.env.META_ACCESS_TOKEN || !context.env.META_ACTION_REQUIRED_TEMPLATE) return context.text("Meta template is not configured", 503);
-    return context.json(await sendActionRequiredTemplate({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: payload.recipientWaId, templateName: context.env.META_ACTION_REQUIRED_TEMPLATE }), 201);
+    const recipientTenant = await deriveTenantIdentity(payload.recipientWaId);
+    const operationId = `wa-out:action-required:${payload.requestId}`;
+    if (!(await reserveOutboundMessage(recipientTenant.merchantId, operationId, context.env)).allowed) return context.json({ sent: false, stage: "usage_limit", message: quotaExceededCustomerMessage("whatsapp_messages") }, 429);
+    const receipt = await sendActionRequiredTemplate({ graphApiVersion: context.env.META_GRAPH_API_VERSION ?? "v20.0", phoneNumberId: context.env.META_PHONE_NUMBER_ID, accessToken: context.env.META_ACCESS_TOKEN, recipientWaId: payload.recipientWaId, templateName: context.env.META_ACTION_REQUIRED_TEMPLATE });
+    await recordOutboundMessage(recipientTenant.merchantId, operationId, receipt.providerMessageId, context.env);
+    return context.json(receipt, 201);
   });
   app.get("/internal/metrics/:siteId", async (context) => {
     if (!adminAuthorized(context.req.header("authorization"), context.env)) return context.text("Unauthorized", 401);

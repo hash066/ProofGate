@@ -57,12 +57,17 @@ function adminBoundary(): GrowthAdminBoundary {
     completeStudioLink: vi.fn(async () => ({ status: "pending" as const })),
     getStudioSession: vi.fn(async () => null),
     revokeStudioSession: vi.fn(async () => ({ revoked: true })),
+    listStudioSessions: vi.fn(async () => []),
+    revokeStudioDevice: vi.fn(async () => ({ revoked: true })),
+    createStudioDataRequest: vi.fn(async (input) => ({ requestId: input.requestId, status: "requested" as const, dueBy: input.dueBy, created: true })),
     saveStudioProject: vi.fn(async (input) => ({ inserted: true, conflict: false, headRevisionId: input.revisionId })),
     listStudioProjects: vi.fn(async () => []),
     listStudioProjectChanges: vi.fn(async () => []),
     beginInboundWorkflow: vi.fn(async (input) => ({ created: true, workflowId: input.workflowId, status: "received" })),
     recordWorkflowProgress: vi.fn(async (input) => ({ inserted: true, status: input.status })),
     enqueueCustomerOutbox: vi.fn(async (input) => ({ inserted: true, outboxId: input.outboxId })),
+    reserveUsage: vi.fn(async () => ({ allowed: true })),
+    recordActualUsage: vi.fn(async () => ({ inserted: true })),
   };
 }
 
@@ -108,6 +113,12 @@ describe("growth Worker", () => {
     expect(html).toContain('data-pg="sync-conflict"');
     expect(html).toContain("Load WhatsApp version");
     expect(html).toContain("Reapply my edits");
+    expect(html).toContain('data-pg="project-switcher"');
+    expect(html).toContain('id="newProjectButton"');
+    expect(html).toContain('data-pg="session-manager"');
+    expect(html).toContain('data-pg="account-data"');
+    expect(html).toContain('id="exportAccountButton"');
+    expect(html).toContain('id="requestDeletionButton"');
     expect(html).toContain("Mobile");
     expect(html).toContain("Desktop");
     expect(html).toMatch(/<script src="\/studio\.js\?v=[a-z0-9-]+" defer><\/script>/);
@@ -137,6 +148,10 @@ describe("growth Worker", () => {
     expect(javascript).toContain("/api/studio/projects/changes");
     expect(javascript).toContain("saved.status===409");
     expect(javascript).toContain("resolveConflict");
+    expect(javascript).toContain("startNewProject");
+    expect(javascript).toContain("/api/studio/sessions");
+    expect(javascript).toContain("/api/studio/account/export");
+    expect(javascript).toContain("/api/studio/account/deletion");
     expect(() => new Script(javascript)).not.toThrow();
   });
 
@@ -177,6 +192,48 @@ describe("growth Worker", () => {
     expect(response.status).toBe(204);
     expect(response.headers.get("set-cookie")).toContain("axcas_session=; Path=/; Max-Age=0");
     expect(admin.revokeStudioSession).toHaveBeenCalledWith(expect.stringMatching(/^[a-f0-9]{64}$/), undefined);
+  });
+
+  it("lists linked devices and revokes one tenant-bound browser session", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioSessions as ReturnType<typeof vi.fn>).mockResolvedValue([{ deviceId: "device-12345678", createdAt: 100, expiresAt: 200, current: true }]);
+    (admin.revokeStudioDevice as ReturnType<typeof vi.fn>).mockResolvedValue({ revoked: true });
+    const app = createApp(undefined, boundary(), admin);
+    const listed = await app.request("http://proofgate.test/api/studio/sessions", { headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" } });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({ sessions: [{ deviceId: "device-12345678", createdAt: 100, expiresAt: 200, current: true }] });
+    const revoked = await app.request("http://proofgate.test/api/studio/sessions/device-12345678", { method: "DELETE", headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" } });
+    expect(revoked.status).toBe(200);
+    expect(admin.revokeStudioDevice).toHaveBeenCalledWith(expect.objectContaining({ merchantId: "merchant-maya", deviceId: "device-12345678" }), undefined);
+  });
+
+  it("exports customer-owned project data and records a deletion request", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioProjects as ReturnType<typeof vi.fn>).mockResolvedValue([{ projectId: "project-maya", revisionId: "revision-1", intent: "website", createdAt: 100, project: { projectId: "project-maya", intent: "website", businessName: "Maya Studio", description: "Tailoring", referenceAssetIds: [], siteAssetIds: [], suppliedClaims: [] } }]);
+    (admin.createStudioDataRequest as ReturnType<typeof vi.fn>).mockImplementation(async (input) => ({ requestId: input.requestId, status: "requested", dueBy: input.dueBy, created: true }));
+    const app = createApp(undefined, boundary(), admin);
+    const exported = await app.request("http://proofgate.test/api/studio/account/export", { method: "POST", headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" } });
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get("content-disposition")).toContain("axcas-account-export.json");
+    const exportedBody = await exported.json();
+    expect(exportedBody).toMatchObject({ schemaVersion: 1, account: { method: "whatsapp" }, projects: [expect.objectContaining({ projectId: "project-maya" })] });
+    expect(JSON.stringify(exportedBody)).not.toContain("a".repeat(64));
+    const deletion = await app.request("http://proofgate.test/api/studio/account/deletion", { method: "POST", headers: { "content-type": "application/json", cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" }, body: JSON.stringify({ confirmation: "DELETE MY DATA" }) });
+    expect(deletion.status).toBe(202);
+    expect(await deletion.json()).toMatchObject({ status: "requested", requestId: expect.stringMatching(/^data-request-/), dueBy: expect.any(Number) });
+    expect(admin.createStudioDataRequest).toHaveBeenCalledWith(expect.objectContaining({ merchantId: "merchant-maya", type: "deletion" }), undefined);
+  });
+
+  it("requires an explicit phrase before recording a deletion request", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-maya", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/account/deletion", {
+      method: "POST", headers: { "content-type": "application/json", cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" }, body: JSON.stringify({ confirmation: "yes" }),
+    });
+    expect(response.status).toBe(400);
+    expect(admin.createStudioDataRequest).not.toHaveBeenCalled();
   });
 
   it("keeps the three channel choices inside the desktop viewport", async () => {
@@ -400,6 +457,22 @@ describe("growth Worker", () => {
     expect(admin.createApproval).toHaveBeenCalledWith(expect.objectContaining({ type: "reel" }), undefined);
   });
 
+  it("does not queue a Studio reel when its atomic render and voice quota reservation is denied", async () => {
+    const admin = adminBoundary();
+    (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
+    (admin.listStudioProjects as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      projectId: "project-reel-limit", revisionId: "revision-reel-limit", intent: "reels", createdAt: Date.now(),
+      project: { projectId: "project-reel-limit", intent: "reels", businessName: "Maya Studio", description: "Custom tailoring", referenceAssetIds: ["asset-photo-1"], siteAssetIds: ["asset-photo-1"], suppliedClaims: [], reelTemplate: "split_explainer", layerOverrides: { hook: "See the fit change", proof: "Measured locally", cta: "Message us", accent: "#fe5b3a", pacing: "fast" } },
+    }]);
+    (admin.reserveUsage as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: false, blockingMetric: "render_seconds" });
+    const response = await createApp(undefined, boundary(), admin).request("http://proofgate.test/api/studio/projects/project-reel-limit/reel", { method: "POST", headers: { cookie: "axcas_session=abcdefghijklmnopqrstuvwxyz1234567890" } });
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ stage: "usage_limit", message: expect.stringMatching(/Axcas usage limit/i) });
+    expect(admin.reserveUsage).toHaveBeenCalledWith(expect.objectContaining({ reservations: [{ metric: "render_seconds", quantity: 15 }, expect.objectContaining({ metric: "polly_characters" })] }), undefined);
+    expect(admin.registerReel).not.toHaveBeenCalled();
+    expect(admin.createApproval).not.toHaveBeenCalled();
+  });
+
   it("queues an approved Studio reel without invoking website promotion", async () => {
     const admin = adminBoundary();
     (admin.getStudioSession as ReturnType<typeof vi.fn>).mockResolvedValue({ merchantId: "merchant-1234567890abcdef", ownerWaIdHash: "a".repeat(64), expiresAt: Date.now() + 10_000 });
@@ -620,6 +693,19 @@ describe("growth Worker", () => {
     expect(duplicate.status).toBe(200);
     expect(await duplicate.json()).toMatchObject({ accepted: true, duplicate: true, workflowIds: [expect.stringMatching(/^workflow-/)] });
     expect(growth.forwardToHermes).toHaveBeenCalledOnce();
+  });
+
+  it("records signed inbound WhatsApp usage but does not invoke Hermes after model quota denial", async () => {
+    const secret = "meta-secret";
+    const body = JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ from: "919876543210", id: "wamid.quota", type: "text", text: { body: "Build my site" } }] } }] }] });
+    const growth = boundary();
+    const admin = adminBoundary();
+    (admin.reserveUsage as ReturnType<typeof vi.fn>).mockResolvedValue({ allowed: false, blockingMetric: "model_turns" });
+    const response = await createApp(undefined, growth, admin).request("http://proofgate.test/whatsapp/webhook", { method: "POST", headers: { "content-type": "application/json", "x-hub-signature-256": await metaSignatureForTest(body, secret) }, body }, { META_APP_SECRET: secret });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ accepted: true, stage: "usage_limit", message: expect.stringMatching(/Axcas usage limit/i) });
+    expect(admin.recordActualUsage).toHaveBeenCalledWith(expect.objectContaining({ metric: "whatsapp_messages", evidenceRef: "meta:wamid.quota" }), expect.anything());
+    expect(growth.forwardToHermes).not.toHaveBeenCalled();
   });
 
   it("fails closed on invalid provider signatures", async () => {
